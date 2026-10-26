@@ -1,0 +1,44 @@
+# Build products and local observations (source/build scripts stay tracked).
+/build/
+/build-*/
+/.local-private/
+*.exe
+*.lib
+*.obj
+*.pdb
+*.ilk
+*.exp
+*.idb
+*.pch
+*.res
+*.log
+*.db
+*.db-*
+*.sqlite
+*.sqlite-*
+*.sqlite3
+*.sqlite3-*
+*.csv
+*.zip
+__pycache__/
+*.pyc
+.vs/
+.vscode/
+.env
+.env.*
+*.pem
+*.key
+*.pfx
+*.p12
+
+# Local work history/research contains machine-specific evidence. Public,
+# current contracts and validation summaries are maintained separately.
+/AGENTS.md
+/WORK_LOG.md
+/docs/evidence/
+/docs/analysis.md
+/docs/implementation.md
+/docs/review.md
+/docs/research-data.md
+/docs/research-ui.md
+/third_party/sqlite/sqlite3ext.h
