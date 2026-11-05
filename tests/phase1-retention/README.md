@@ -1,0 +1,33 @@
+# Retention/replay regression
+
+`test_retention.c` is a synthetic reducer/retention fixture. It uses the test-only `experiment_fixture` adapter to seed complete reducer evidence and inject sidecar SQL failures. Current source roots link their independent prototype objects; only the adapter compatibility TU includes `experiment.c` for a historical root that predates the split. Public ingest and replay exercise the defect and fixed behavior. Source-window numbers are synthetic; this does not test the collector, real 28-day usage, or user benefit.
+
+- Before source: run `--expect-defect` to explicitly demonstrate the two historical defects. This mode must not be the permanent post-fix pass condition.
+- Run the identical `--regression-pair` fixed-invariant oracle against before and after builds: the original source must fail the retained-public-replay and no-episode-evaluation-orphan assertions (two failures), while fixed builds must pass both. This small mode avoids repeating the full fixed suite merely to show the pre-fix failures.
+- Bugfix-presplit and final source: run `--expect-fixed`. Cases include 999/1000/1001/1005/5005 expired operations; active/recovered/unknown; repeated bounded trim; fully retained replay; 1005 evaluations sharing an episode/decision/both; episode-only and decision-only ratings of a gap-ended episode; 1005 expired reductions and pre-existing dangling evaluations; denied prepare at each retention statement and a final-step abort. Failed ingest must leave the sidecar unchanged and idle, retain the committed core run, return no snapshot, then permit reset/retry.
+- Diagnostic-only `--profile-only` compares `NOT IN` and correlated `NOT EXISTS` query plans/counters on a separate 20,000-decision/1,000-episode SQL dataset, then records actual retention statement counters with 132,000 decisions and 2,000 evaluations at the cutoff (nothing expires). This is not an elapsed-time performance comparison. Fixed-case output also records actual retention counters during backlog and evaluation-protected cleanup.
+
+The fixed integration mode additionally seeds 1,033 episodes through the actual reducer. After bounded cleanup, mixed active/recovered/unknown summary-only roots remain alongside an earlier global gap preserved by another episode's 1,005 ratings. Replay must preserve every recorded numeric summary and all retained decision fields. A summary-only boundary has no surviving decision input from which to reconstruct its outcome: replay restores that recorded row after processing operations. This is preserved projection history, not a newly recomputed observation. The independent review fixture separately checks 1,024 recovered episode roots created by 512 actual reducer windows.
+
+The output directory must already exist and be new. DBs and replay copies are retained. Every generated filename includes a monotonically increasing fixture serial; rerunning into the same directory is rejected by normal new-file guards. Original `docs/structural-review-2026-11-04/repro-core` inputs and outputs are unchanged.
+
+Use the checked-in build helpers, which select the matching companions and fixture mode through `scripts/compile-prototype-fixture.cmd`. The current integration build compiles the split prototype modules, the experiment and monitor adapters, and links the matching `monitor.lib` plus `user32.lib`. It does not directly include the coordinator in the test. The historical compatibility adapter includes the selected old coordinator and links any companions that exist at that root; do not manually mix old headers, current modules and another library.
+
+From the repository root, with new output directory names:
+
+```powershell
+.\build-monitor.cmd build-check-retention-core
+.\tests\phase1-retention\build.cmd build-check-retention . build-check-retention-core\monitor.lib
+New-Item -ItemType Directory -Path build-check-retention\run
+.\build-check-retention\test_retention.exe build-check-retention\run --expect-fixed
+.\tests\phase1-retention\build-module.cmd build-check-retention-module .
+.\build-check-retention-module\test_retention_module.exe
+```
+
+The full profile runner supplies these paths and isolates its run directories automatically; see [the current profile guide](../README.md). For a historical before/after comparison, pass the separately preserved `SOURCE_ROOT` and matching `MONITOR_LIB` to `build.cmd OUT SOURCE_ROOT MONITOR_LIB`. The source-preservation tree is not part of a fresh submission checkout. `--expect-defect` and a failing before `--regression-pair` demonstrate the old defects; they do not constitute a passing current regression. `--profile-only` is an explicitly selected diagnostic using new output, not a timing acceptance result.
+
+The fixed retention transaction preserves all remaining decision/reduction/evaluation targets. Evaluations expire in batches of at most 1,000; any surviving rating keeps its episode's linked decision windows and matching outcome gap until the next bounded cleanup removes the rating. Numeric activation/last-decision IDs alone do not pin old evidence. Stale reductions use the existing episode latest-time expiry boundary, so references cannot retain expired continuity forever. An old dangling evaluation is repaired by the same bounded cleanup. No schema, index, DB version, public API, or replay interpretation changes.
+
+SQLite's [statement-status API](https://www.sqlite.org/c3ref/stmt_status.html) supplies the diagnostic counters. [VM_STEP/FULLSCAN_STEP/SORT](https://www.sqlite.org/c3ref/c_stmtstatus_counter.html) measure VM work, full-scan advances and sort operations; `MEMUSED` is only approximate statement-storage heap bytes, not peak transient allocation or total process memory. The [WITH clause](https://www.sqlite.org/lang_with.html) scopes `rated_episode` to one statement; the actual query plan/counters must establish its execution cost rather than assuming that the CTE is free or always materialized.
+
+`build-module.cmd OUT SOURCE_ROOT` separately compiles `test_retention_module.c` with only the private header, the retention object and bundled SQLite using the product's vendor flags. Its in-memory minimal schema checks borrowed connection/statement ownership, caller-owned transaction and rollback, unchanged success error storage, finalization after late prepare/step failures, and 1001→1→0 ratings preserving window/outcome-gap/episode references until cleanup progresses. It does not include any product `.c` or link `monitor.lib`, collector or GUI, and needs no explicit user32/gdi32 import libraries. The integration fixture above remains responsible for the full schema, public partial-commit boundary and replay equivalence.

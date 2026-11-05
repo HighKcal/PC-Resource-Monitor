@@ -20,6 +20,8 @@ cl %CFLAGS% tests\collector\test_core.c /Fo"%OUT%\test_core.obj" /Fe"%OUT%\test_
 if errorlevel 1 goto failed
 cl %CFLAGS% tests\collector\test_windows.c /Fo"%OUT%\test_windows.obj" /Fe"%OUT%\test_windows.exe" "%OUT%\resource_collector.lib" /link user32.lib
 if errorlevel 1 goto failed
+cl %CFLAGS% tests\collector\test_display.c /Fo"%OUT%\test_display.obj" /Fe"%OUT%\test_display.exe" "%OUT%\resource_core.obj" /link user32.lib
+if errorlevel 1 goto failed
 echo Collector build succeeded: %OUT%
 popd
 exit /b 0

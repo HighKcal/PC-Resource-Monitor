@@ -1,82 +1,87 @@
-#define WIN32_LEAN_AND_MEAN
-#include <windows.h>
+/* 품질을 충족한 현재 창을 과거 분포와 비교한다. 현재 창의 학습 포함 여부도 여기서 정한다.
+ * DB 쓰기와 인스턴스 연속 초과 상태 적용은 호출자가 담당한다. */
 #include <stdio.h>
 #include <stdlib.h>
-#include <string.h>
 #include <math.h>
 #include <limits.h>
-#include "monitor_internal.h"
-#include "storage_internal.h"
-
-#define TICKS MONITOR_TICKS_PER_SECOND
-#define DAY MONITOR_DAY_TICKS
 #include "baseline.h"
-static const double floors[4] = { 5.0, 134217728.0, 1048576.0, 1048576.0 };
+/* 상한 최소 증가폭의 단위: CPU 퍼센트포인트, WorkingSet 바이트, 읽기·쓰기 B/s. */
+static const double metric_threshold_floors[4] = {
+    BASELINE_CPU_FLOOR, BASELINE_RAM_FLOOR, BASELINE_READ_FLOOR, BASELINE_WRITE_FLOOR };
 
 static int double_compare(const void *a, const void *b)
 {
     double x = *(const double *)a, y = *(const double *)b;
     return (x > y) - (x < y);
 }
+
+
 static double median(double *v, unsigned n)
 {
     qsort(v, n, sizeof(*v), double_compare);
     return n % 2 ? v[n / 2] : v[n / 2 - 1] / 2 + v[n / 2] / 2;
 }
-int monitor_baseline(MonitorEngine *e, MonitorInstance *p, unsigned metric,
-    sqlite3_int64 cutoff, MonitorMetricReport *r)
+
+
+static void compare_history(const BaselineInput *input, double *values,
+    unsigned sample_count, unsigned date_count, MonitorMetricReport *r, unsigned *next_streak)
 {
-    double values[896], deviations[896];
-    uint64_t minute_ids[896];
-    unsigned n = 0, days = 0, minutes = 0, age, k;
-    uint64_t date = p->start / DAY;
-    for (age = 0; age < 14 && date >= age; ++age) {
-        sqlite3_stmt *s = e->baseline_query;
-        uint64_t lower = (date - age) * DAY, upper = lower + DAY;
-        unsigned before = n;
-        int rc;
-        /* The bounded SQL chain performs the same per-minute index seeks, but
-         * binds/resets only once per date. Exact start and cutoff filter every
-         * recursive selection. The value uses a scalar PK lookup so an outer
-         * metric join cannot turn this into a scan over all program metrics. */
-        sqlite3_bind_int(s, 1, (int)metric); sqlite3_bind_int64(s, 2, p->program_id);
-        sqlite3_bind_int64(s, 3, (sqlite3_int64)lower); sqlite3_bind_int64(s, 4, (sqlite3_int64)upper);
-        sqlite3_bind_int64(s, 5, (sqlite3_int64)p->start); sqlite3_bind_int64(s, 6, cutoff);
-        while ((rc = sqlite3_step(s)) == SQLITE_ROW) {
-            uint64_t minute;
-            double v;
-            unsigned j;
-            minute = (uint64_t)sqlite3_column_int64(s, 1) / (60 * TICKS);
-            v = sqlite3_column_double(s, 0);
-            if (n < 896 && isfinite(v) && v >= 0) {
-                values[n++] = v;
-                for (j = 0; j < minutes && minute_ids[j] != minute; ++j) { }
-                if (j == minutes) minute_ids[minutes++] = minute;
-            }
-        }
-        if (rc != SQLITE_DONE) monitor_db_set_error(e, "baseline query");
-        sqlite3_reset(s); sqlite3_clear_bindings(s);
-        if (rc != SQLITE_DONE) return 0;
-        if (n > before) ++days;
+    double deviations[BASELINE_MAX_SAMPLES];
+    unsigned distinct_minutes, index, metric = input->metric, streak = input->prior_streak;
+    /* 재귀 선택은 UTC 종료 분을 거슬러 내려가며 날짜 범위가 겹치지 않아 표본 수가 고유 분 수다. */
+    distinct_minutes = sample_count;
+    r->count = sample_count;
+    r->days = date_count;
+    r->minutes = distinct_minutes;
+
+    /* 중앙값과 MAD를 구한 뒤 변동폭·중앙값 비율·최소 증가폭 중 최댓값을 중앙값에 더해 상한을 정한다. */
+    if (sample_count) {
+        r->median = median(values, sample_count);
+        for (index = 0; index < sample_count; ++index)
+            deviations[index] = fabs(values[index] - r->median);
+        r->mad = median(deviations, sample_count);
+        r->threshold = r->median + fmax(fmax(3 * 1.4826 * r->mad, 0.5 * r->median), metric_threshold_floors[metric]);
     }
-    r->count = n; r->days = days; r->minutes = minutes;
-    if (n) {
-        r->median = median(values, n);
-        for (k = 0; k < n; ++k) deviations[k] = fabs(values[k] - r->median);
-        r->mad = median(deviations, n);
-        r->threshold = r->median + fmax(fmax(3 * 1.4826 * r->mad, 0.5 * r->median), floors[metric]);
-    }
-    if (n < 60 || days < 3 || minutes < 60) {
-        p->streak[metric] = 0; r->state = MONITOR_LEARNING; r->baseline_eligible = 1;
+
+    /* 준비 전 창·준비 후 정상 창은 학습에 포함하고, 준비 후 상한 초과 창은 제외한다.
+     * 연속 초과 횟수는 인스턴스별로 유지한다. */
+    if (sample_count < BASELINE_READY_WINDOWS || date_count < BASELINE_READY_UTC_DAYS ||
+        distinct_minutes < BASELINE_READY_MINUTES) {
+        streak = 0;
+        r->state = MONITOR_LEARNING;
+        r->baseline_eligible = 1;
         snprintf(r->reason, sizeof(r->reason), "need 60 windows / 3 UTC dates / 60 distinct minutes");
     } else if (r->current > r->threshold) {
-        if (p->streak[metric] < UINT_MAX) ++p->streak[metric];
-        r->state = p->streak[metric] >= 3 ? MONITOR_CANDIDATE : MONITOR_ATTENTION;
+        if (streak < UINT_MAX) ++streak;
+        r->state = streak >= BASELINE_CANDIDATE_STREAK ? MONITOR_CANDIDATE : MONITOR_ATTENTION;
         r->baseline_eligible = 0;
         snprintf(r->reason, sizeof(r->reason), "upper threshold exceeded; excluded from baseline");
     } else {
-        p->streak[metric] = 0; r->state = MONITOR_NORMAL; r->baseline_eligible = 1;
+        streak = 0;
+        r->state = MONITOR_NORMAL;
+        r->baseline_eligible = 1;
         snprintf(r->reason, sizeof(r->reason), "ready metric at or below upper threshold");
     }
-    r->streak = p->streak[metric]; return 1;
+    r->streak = streak;
+    *next_streak = streak;
+}
+
+int monitor_baseline(BaselineHistoryScope *history, const BaselineInput *input,
+    MonitorMetricReport *r, unsigned *next_streak)
+{
+    double values[BASELINE_MAX_SAMPLES];
+    unsigned sample_count = 0, date_count = 0, days_ago;
+    uint64_t utc_date = input->exact_start / MONITOR_DAY_TICKS;
+    /* 현재 창보다 앞선 이력을 먼저 모은 뒤 통계와 다음 연속 초과 횟수를 계산한다. */
+    for (days_ago = 0; days_ago < BASELINE_HISTORY_UTC_DAYS && utc_date >= days_ago; ++days_ago) {
+        double selected[BASELINE_SAMPLES_PER_DAY];
+        uint64_t lower = (utc_date - days_ago) * MONITOR_DAY_TICKS, upper = lower + MONITOR_DAY_TICKS;
+        unsigned previous_count = sample_count, selected_count, i;
+        if (!baseline_history_select_day(history, input->program_id, input->metric, lower, upper, input->exact_start, selected, &selected_count)) return 0;
+        for (i = 0; i < selected_count && sample_count < BASELINE_MAX_SAMPLES; ++i)
+            values[sample_count++] = selected[i];
+        if (sample_count > previous_count) ++date_count;
+    }
+    compare_history(input, values, sample_count, date_count, r, next_streak);
+    return 1;
 }

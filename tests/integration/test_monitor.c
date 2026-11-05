@@ -1,10 +1,12 @@
+/* 합성 배치와 별도 임시 DB로 창 품질·과거 선택·학습 정책·저장 실패 복구를 검증한다.
+ * 통제된 기능 회귀이며 실제 장기 학습이나 사용자 효용을 입증하지는 않는다. */
 #define WIN32_LEAN_AND_MEAN
 #include <windows.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <math.h>
-#include "monitor_internal.h"
+#include "../support/monitor_fixture.h"
 
 static unsigned checks, failures, file_sequence;
 #define CHECK(x) do { ++checks; if (!(x)) { ++failures; printf("FAIL line %d: %s\n", __LINE__, #x); } } while (0)
@@ -20,7 +22,7 @@ typedef struct Fixture {
 static int sql(MonitorEngine *e, const char *text)
 {
     char *error = NULL;
-    int rc = sqlite3_exec(e->db, text, NULL, NULL, &error);
+    int rc = sqlite3_exec(monitor_fixture_db(e), text, NULL, NULL, &error);
     if (rc != SQLITE_OK) printf("fixture SQL error: %s\n", error);
     sqlite3_free(error); return rc == SQLITE_OK;
 }
@@ -28,7 +30,7 @@ static int64_t scalar(MonitorEngine *e, const char *text)
 {
     sqlite3_stmt *s = NULL;
     int64_t v = -1;
-    CHECK(sqlite3_prepare_v2(e->db, text, -1, &s, NULL) == SQLITE_OK);
+    CHECK(sqlite3_prepare_v2(monitor_fixture_db(e), text, -1, &s, NULL) == SQLITE_OK);
     if (sqlite3_step(s) == SQLITE_ROW) v = sqlite3_column_int64(s, 0);
     else CHECK(0);
     sqlite3_finalize(s); return v;
@@ -84,9 +86,9 @@ static void seed(Fixture *f, unsigned count, int same_minute, unsigned metric_ma
     sqlite3_stmt *w = NULL, *metric = NULL;
     sqlite3_int64 run = scalar(f->engine, "SELECT max(id) FROM collection_run"), program = f->snapshot->rows[0].program_id;
     CHECK(sql(f->engine, "BEGIN IMMEDIATE"));
-    CHECK(sqlite3_prepare_v2(f->engine->db,
+    CHECK(sqlite3_prepare_v2(monitor_fixture_db(f->engine),
         "INSERT INTO aggregate_window(run_id,program_id,pid,creation,start_utc,end_utc,duration,version) VALUES(?,?,1,1,?,?,60,1)", -1, &w, NULL) == SQLITE_OK);
-    CHECK(sqlite3_prepare_v2(f->engine->db,
+    CHECK(sqlite3_prepare_v2(monitor_fixture_db(f->engine),
         "INSERT INTO aggregate_metric VALUES(?,?,?,60,20,1,1,'seed',0,0,0,NULL,NULL,NULL,0)", -1, &metric, NULL) == SQLITE_OK);
     for (i = 0; i < count; ++i) {
         uint64_t end = (f->now / MONITOR_DAY_TICKS - (uint64_t)(day_offset + (int)(i % 3))) * MONITOR_DAY_TICKS +
@@ -94,7 +96,7 @@ static void seed(Fixture *f, unsigned count, int same_minute, unsigned metric_ma
         sqlite3_int64 id;
         sqlite3_bind_int64(w, 1, run); sqlite3_bind_int64(w, 2, program);
         sqlite3_bind_int64(w, 3, (sqlite3_int64)(end - 60 * MONITOR_TICKS_PER_SECOND)); sqlite3_bind_int64(w, 4, (sqlite3_int64)end);
-        CHECK(sqlite3_step(w) == SQLITE_DONE); sqlite3_reset(w); id = sqlite3_last_insert_rowid(f->engine->db);
+        CHECK(sqlite3_step(w) == SQLITE_DONE); sqlite3_reset(w); id = sqlite3_last_insert_rowid(monitor_fixture_db(f->engine));
         for (m = 0; m < 4; ++m) if (metric_mask & (1u << m)) {
             sqlite3_bind_int64(metric, 1, id); sqlite3_bind_int(metric, 2, (int)m);
             sqlite3_bind_double(metric, 3, m == 0 ? 10 : m == 1 ? 67108864 : 0);
@@ -133,7 +135,7 @@ static void test_policy(void)
     CHECK(f.snapshot->rows[0].metric[0].state == MONITOR_UNAVAILABLE && !f.snapshot->rows[0].metric[0].streak);
     f.rows[0].valid_fields |= RESOURCE_VALID_CPU;
     while (f.snapshot->completed_windows == 0) CHECK(tick(&f, 3));
-    CHECK(f.snapshot->rows[0].metric[0].streak == 1); /* 95% valid window, but missing sample reset persistence. */
+    CHECK(f.snapshot->rows[0].metric[0].streak == 1); /* 창의 95%가 유효해도 결측 표본에서 연속 초과 상태가 끊긴다. */
     f.rows[0].cpu_percent = 10; window(&f); CHECK(f.snapshot->rows[0].metric[0].streak == 0);
     cleanup(&f);
 }
@@ -167,15 +169,15 @@ static void test_past_only(void)
     char update[256];
     init(&f, 2); CHECK(tick(&f, 0)); seed(&f, 59, 0, 15, 1);
     cutoff = scalar(f.engine, "SELECT max(id) FROM aggregate_window");
-    seed(&f, 60, 0, 15, -1); /* future/current date rows must not prepare baseline */
+    seed(&f, 60, 0, 15, -1); /* 현재·미래 행으로 학습 준비 조건을 채우면 안 된다. */
     snprintf(update, sizeof(update), "UPDATE aggregate_window SET start_utc=%llu,end_utc=%llu WHERE id>%lld",
         (unsigned long long)(f.now + MONITOR_DAY_TICKS), (unsigned long long)(f.now + MONITOR_DAY_TICKS + 60 * MONITOR_TICKS_PER_SECOND), (long long)cutoff);
     CHECK(sql(f.engine, update));
     window(&f);
     CHECK(f.snapshot->rows[0].metric[0].state == MONITOR_LEARNING);
     CHECK(f.snapshot->rows[0].metric[0].count == 59);
-    CHECK(f.snapshot->rows[1].metric[0].count == 59); /* one cutoff excludes same batch's first close */
-    window(&f); CHECK(f.snapshot->rows[0].metric[0].count == 59); /* preceding boundary has end==start */
+    CHECK(f.snapshot->rows[1].metric[0].count == 59); /* 회차 공통 cutoff가 같은 배치에서 먼저 완료된 창을 제외한다. */
+    window(&f); CHECK(f.snapshot->rows[0].metric[0].count == 59); /* 직전 창의 end==현재 창 start인 경계도 제외한다. */
     window(&f); CHECK(f.snapshot->rows[0].metric[0].state == MONITOR_NORMAL);
     CHECK(f.snapshot->rows[0].metric[0].count == 60);
     cleanup(&f);
@@ -225,12 +227,12 @@ static void test_coverage_null_rollback(void)
     CHECK(f.snapshot->rows[0].metric[3].state == MONITOR_LEARNING);
     runs = scalar(f.engine, "SELECT count(*) FROM collection_run"); raw = scalar(f.engine, "SELECT count(*) FROM raw");
     CHECK(sql(f.engine, "CREATE TRIGGER failraw BEFORE INSERT ON raw BEGIN SELECT RAISE(ABORT,'synthetic rollback'); END"));
-    CHECK(!tick(&f, 3)); CHECK(f.snapshot == NULL && f.engine->count == 0);
+    CHECK(!tick(&f, 3)); CHECK(f.snapshot == NULL && monitor_fixture_instance_count(f.engine) == 0);
     CHECK(scalar(f.engine, "SELECT count(*) FROM collection_run") == runs);
     CHECK(scalar(f.engine, "SELECT count(*) FROM raw") == raw);
     CHECK(sql(f.engine, "DROP TRIGGER failraw")); CHECK(tick(&f, 3));
     CHECK(f.snapshot->rows[0].metric[3].window_end_utc_100ns == 0);
-    CHECK(monitor_record_failure(f.engine, f.now, 5)); CHECK(f.engine->count == 0);
+    CHECK(monitor_record_failure(f.engine, f.now, 5)); CHECK(monitor_fixture_instance_count(f.engine) == 0);
     CHECK(scalar(f.engine, "SELECT count(*) FROM collection_run WHERE status=5 AND row_count=0") == 1);
     cleanup(&f);
 }
@@ -247,7 +249,7 @@ static void test_caps_schema_busy(void)
     CHECK(f.snapshot->rows[0].metric[1].state == MONITOR_LEARNING && !f.snapshot->rows[0].metric[1].count);
     CHECK(sqlite3_open(f.file, &other) == SQLITE_OK);
     CHECK(sqlite3_exec(other, "BEGIN IMMEDIATE", NULL, NULL, NULL) == SQLITE_OK);
-    CHECK(!tick(&f, 3)); CHECK(f.engine->count == 0);
+    CHECK(!tick(&f, 3)); CHECK(monitor_fixture_instance_count(f.engine) == 0);
     CHECK(sqlite3_exec(other, "ROLLBACK", NULL, NULL, NULL) == SQLITE_OK); sqlite3_close(other);
     CHECK(tick(&f, 3));
     CHECK(!monitor_open(f.file, 0, &rejected, error, sizeof(error)) && !rejected);
@@ -269,15 +271,15 @@ static void test_multi_instance_minute_depth(void)
     run = scalar(f.engine, "SELECT max(id) FROM collection_run");
     program = f.snapshot->rows[0].program_id;
     CHECK(sql(f.engine, "BEGIN IMMEDIATE"));
-    CHECK(sqlite3_prepare_v2(f.engine->db,
+    CHECK(sqlite3_prepare_v2(monitor_fixture_db(f.engine),
         "INSERT INTO aggregate_window(run_id,program_id,pid,creation,start_utc,end_utc,duration,version) VALUES(?,?,?,?,?,?,60,1)",
         -1, &w, NULL) == SQLITE_OK);
-    CHECK(sqlite3_prepare_v2(f.engine->db,
+    CHECK(sqlite3_prepare_v2(monitor_fixture_db(f.engine),
         "INSERT INTO aggregate_metric VALUES(?,0,10,60,20,1,1,'multi-instance seed',0,0,0,NULL,NULL,NULL,0)",
         -1, &metric, NULL) == SQLITE_OK);
-    /* Same exact path: 32 PID+creation instances, 20 distinct completed minutes
-     * on each of three prior UTC dates. Latest 64 rows/day cover only 2 minutes.
-     * There is sufficient real represented time; concurrency cannot create it. */
+    /* 동일한 경로에 PID+생성시각이 다른 인스턴스 32개를 두고, 과거 3 UTC 날짜에
+     * 각각 서로 다른 완료 분 20개를 만든다. 단순 최신 64행은 2분만 대표한다.
+     * 동시 인스턴스 수가 아닌 합성 이력의 서로 다른 관측 분을 선택하는지 확인한다. */
     for (day = 1; day <= 3; ++day) for (minute = 1; minute <= 20; ++minute)
         for (process = 0; process < 32; ++process) {
             uint64_t end = (f.now / MONITOR_DAY_TICKS - day) * MONITOR_DAY_TICKS +
@@ -288,7 +290,7 @@ static void test_multi_instance_minute_depth(void)
             sqlite3_bind_int64(w, 5, (sqlite3_int64)(end - 60 * MONITOR_TICKS_PER_SECOND));
             sqlite3_bind_int64(w, 6, (sqlite3_int64)end);
             CHECK(sqlite3_step(w) == SQLITE_DONE); sqlite3_reset(w);
-            sqlite3_bind_int64(metric, 1, sqlite3_last_insert_rowid(f.engine->db));
+            sqlite3_bind_int64(metric, 1, sqlite3_last_insert_rowid(monitor_fixture_db(f.engine)));
             CHECK(sqlite3_step(metric) == SQLITE_DONE); sqlite3_reset(metric);
         }
     sqlite3_finalize(w); sqlite3_finalize(metric); CHECK(sql(f.engine, "COMMIT"));
@@ -312,14 +314,14 @@ static void insert_representative_variant(Fixture *f, sqlite3_int64 run, sqlite3
     sqlite3_stmt *w = NULL, *metric = NULL;
     sqlite3_int64 id;
     unsigned m;
-    CHECK(sqlite3_prepare_v2(f->engine->db,
+    CHECK(sqlite3_prepare_v2(monitor_fixture_db(f->engine),
         "INSERT INTO aggregate_window(run_id,program_id,pid,creation,start_utc,end_utc,duration,version) VALUES(?,?,2000,1,?,?,60,?)",
         -1, &w, NULL) == SQLITE_OK);
     sqlite3_bind_int64(w, 1, run); sqlite3_bind_int64(w, 2, program);
     sqlite3_bind_int64(w, 3, (sqlite3_int64)(end - 60 * MONITOR_TICKS_PER_SECOND)); sqlite3_bind_int64(w, 4, (sqlite3_int64)end);
     sqlite3_bind_int(w, 5, (int)version); CHECK(sqlite3_step(w) == SQLITE_DONE); sqlite3_finalize(w);
-    id = sqlite3_last_insert_rowid(f->engine->db);
-    CHECK(sqlite3_prepare_v2(f->engine->db,
+    id = sqlite3_last_insert_rowid(monitor_fixture_db(f->engine));
+    CHECK(sqlite3_prepare_v2(monitor_fixture_db(f->engine),
         "INSERT INTO aggregate_metric VALUES(?,?,?,60,20,?,1,'representative seed',0,0,0,NULL,NULL,NULL,0)",
         -1, &metric, NULL) == SQLITE_OK);
     for (m = 0; m < 4; ++m) {
@@ -343,15 +345,15 @@ static void test_minute_representatives(void)
     init(&f, 1); f.rows[0].cpu_percent = 0; CHECK(tick(&f, 0));
     run = scalar(f.engine, "SELECT max(id) FROM collection_run"); program = f.snapshot->rows[0].program_id;
     CHECK(sql(f.engine, "INSERT INTO program(path,name,first_seen,last_seen) VALUES('SYNTHETIC:\\other\\same.exe','same.exe',1,1)"));
-    other = sqlite3_last_insert_rowid(f.engine->db);
+    other = sqlite3_last_insert_rowid(monitor_fixture_db(f.engine));
     CHECK(sql(f.engine, "BEGIN IMMEDIATE"));
     for (day = 1; day <= 3; ++day) for (minute = 1; minute <= 20; ++minute) {
         uint64_t base = (f.now / MONITOR_DAY_TICKS - day) * MONITOR_DAY_TICKS +
             (uint64_t)minute * 60 * MONITOR_TICKS_PER_SECOND;
         insert_representative_variant(&f, run, program, base + 20 * MONITOR_TICKS_PER_SECOND, 1, latest, 15, 0);
         insert_representative_variant(&f, run, program, base + 10 * MONITOR_TICKS_PER_SECOND, 1, older, 15, 0);
-        /* Higher id at equal time wins CPU=0. NULL RAM and infinite write must
-         * not hide older finite values; ineligible read must not hide read=100. */
+        /* 같은 종료시각이면 큰 ID의 CPU=0을 선택한다. NULL RAM·무한대 쓰기 값은
+         * 이전 유한값을, 학습 제외된 읽기 값은 이전 read=100을 가리면 안 된다. */
         insert_representative_variant(&f, run, program, base + 20 * MONITOR_TICKS_PER_SECOND, 1, tie, 11, 2);
         insert_representative_variant(&f, run, program, base + 30 * MONITOR_TICKS_PER_SECOND, 1, invalid, 15, 2);
         insert_representative_variant(&f, run, program, base + 40 * MONITOR_TICKS_PER_SECOND, 1, excluded, 0, 0);
@@ -394,25 +396,25 @@ static void benchmark_minute_selection(unsigned density)
             insert_representative_variant(&f, run, program, finish, 1, values, 15, 0);
         }
     CHECK(sql(f.engine, "COMMIT"));
-    snprintf(explain, sizeof(explain), "EXPLAIN QUERY PLAN %s", sqlite3_sql(f.engine->baseline_query));
-    CHECK(sqlite3_prepare_v2(f.engine->db, explain, -1, &plan, NULL) == SQLITE_OK);
+    snprintf(explain, sizeof(explain), "EXPLAIN QUERY PLAN %s", sqlite3_sql(monitor_fixture_baseline_statement(f.engine)));
+    CHECK(sqlite3_prepare_v2(monitor_fixture_db(f.engine), explain, -1, &plan, NULL) == SQLITE_OK);
     while (sqlite3_step(plan) == SQLITE_ROW) printf("BENCH_PLAN density=%u %s\n", density, sqlite3_column_text(plan, 3));
     sqlite3_finalize(plan); QueryPerformanceFrequency(&frequency);
     for (repetition = 0; repetition < 5; ++repetition) {
         double elapsed;
         for (i = 0; i < 19; ++i) CHECK(tick(&f, 3));
-        sqlite3_stmt_status(f.engine->baseline_query, SQLITE_STMTSTATUS_VM_STEP, 1);
-        sqlite3_stmt_status(f.engine->baseline_query, SQLITE_STMTSTATUS_FULLSCAN_STEP, 1);
-        sqlite3_stmt_status(f.engine->baseline_query, SQLITE_STMTSTATUS_SORT, 1);
+        sqlite3_stmt_status(monitor_fixture_baseline_statement(f.engine), SQLITE_STMTSTATUS_VM_STEP, 1);
+        sqlite3_stmt_status(monitor_fixture_baseline_statement(f.engine), SQLITE_STMTSTATUS_FULLSCAN_STEP, 1);
+        sqlite3_stmt_status(monitor_fixture_baseline_statement(f.engine), SQLITE_STMTSTATUS_SORT, 1);
         QueryPerformanceCounter(&begin); CHECK(tick(&f, 3)); QueryPerformanceCounter(&end);
         elapsed = (double)(end.QuadPart - begin.QuadPart) * 1000 / (double)frequency.QuadPart;
         total += elapsed; if (elapsed > maximum) maximum = elapsed; if (elapsed < minimum) minimum = elapsed;
         printf("BENCH_CLOSE density=%u iteration=%u ms=%.3f n=%u days=%u minutes=%u state=%s vm_steps=%d fullscan_steps=%d sorts=%d\n",
             density, repetition + 1, elapsed, f.snapshot->rows[0].metric[0].count, f.snapshot->rows[0].metric[0].days,
             f.snapshot->rows[0].metric[0].minutes, monitor_state_name(f.snapshot->rows[0].metric[0].state),
-            sqlite3_stmt_status(f.engine->baseline_query, SQLITE_STMTSTATUS_VM_STEP, 0),
-            sqlite3_stmt_status(f.engine->baseline_query, SQLITE_STMTSTATUS_FULLSCAN_STEP, 0),
-            sqlite3_stmt_status(f.engine->baseline_query, SQLITE_STMTSTATUS_SORT, 0));
+            sqlite3_stmt_status(monitor_fixture_baseline_statement(f.engine), SQLITE_STMTSTATUS_VM_STEP, 0),
+            sqlite3_stmt_status(monitor_fixture_baseline_statement(f.engine), SQLITE_STMTSTATUS_FULLSCAN_STEP, 0),
+            sqlite3_stmt_status(monitor_fixture_baseline_statement(f.engine), SQLITE_STMTSTATUS_SORT, 0));
     }
     printf("BENCH_SUMMARY SYNTHETIC density=%u history_windows=%u closes=5 min_ms=%.3f mean_ms=%.3f max_ms=%.3f\n",
         density, 3 * 64 * density, minimum, total / 5, maximum);

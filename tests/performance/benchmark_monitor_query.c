@@ -3,7 +3,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include "monitor_internal.h"
+#include "../support/monitor_fixture.h"
 
 /* Read-only SQL candidate experiment. Not product code. Both algorithms select
  * bounded per-minute representatives with the same six predicates/parameters. */

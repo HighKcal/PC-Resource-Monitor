@@ -20,7 +20,7 @@ git switch -c collector/example-change
 
 담당 폴더와 연결 테스트를 수정한다. [개발 명령](docs/development.md)을 따라 깨끗한 별도 출력 폴더에서 빌드하고 회귀 테스트를 실행한다. 공통 헤더, 내부 연결 헤더, DB 스키마, 관측창, Baseline 정책, worker 흐름을 바꾸기 전에는 영향받는 담당자와 PR 또는 Issue에서 계약을 협의한다.
 
-특히 `include/`는 공개 API, `engine/monitor_internal.h`는 내부 연결 규격이다. `storage/monitor_schema.h`와 `storage/schema.sql`은 일치해야 한다. 알고리즘이 SQLite 조회 조건을 바꾸면 storage와 detection 담당이 함께 검토한다. 현재 회차 누출, 결측을 0으로 처리, PID만으로 연결하는 변경을 금한다.
+특히 `include/`는 공개 API, `engine/monitor_engine_private.h`는 engine 전용 내부 상태다. 저장값은 `storage/monitor_store.h`, prototype의 commit 결과는 `engine/monitor_source.h` 계약을 사용한다. `storage/monitor_schema.h`와 `storage/schema.sql`은 일치해야 한다. 알고리즘이 SQLite 조회 조건을 바꾸면 storage와 detection 담당이 함께 검토한다. 현재 회차 누출, 결측을 0으로 처리, PID만으로 연결하는 변경을 금한다.
 
 개인 PC의 DB, 프로세스 목록, 경로, CSV, 화면 캡처, 키·토큰, 실행 파일을 커밋하지 않는다. 합성 테스트 데이터와 실제 장기 학습을 구분한다. Windows 실행 정책이 차단하면 정책을 변경하거나 우회하지 말고 차단된 검증을 기록한다.
 
