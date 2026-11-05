@@ -1,6 +1,31 @@
 # 개인화 Baseline과 이상 후보 계약
 
-실제 통계·판정은 `detection/baseline.c`, 내부 함수 계약은 `detection/baseline.h`다. 관측창은 `engine/monitor.c`, prepared SQL과 인덱스는 storage가 관리한다. 공개 결과 자료형은 [monitor.h](../../include/monitor.h)다.
+통계·판정은 `detection/baseline.c`, 내부 함수 계약은 `detection/baseline.h`다. DB 없는 관측창 누적·품질은 `engine/monitor_window.c`가 맡는다. `storage/monitor_history.c`가 기존 prepared SQL을 관리하고 `detection/baseline_history.c`가 회차 캐시를 소유한다. 공개 결과 자료형은 `monitor_types.h`에 있고 기존 [monitor.h](../../include/monitor.h)를 통해 사용할 수 있다.
+
+## 경계와 입력·출력
+
+`BaselineInput`은 program ID, metric, 정밀 start, 이전 streak를 명시한다. report는 품질을
+확인한 current/창 metadata를 담아 들어오고 통계·상태·학습 포함 결과와 다음 streak가
+나온다. Baseline은 engine instance를 변경하지 않는다. engine이 성공한 다음 streak를
+적용하고 저장·실패 복구 순서를 조율한다. 내부 `compare_history`는 선택된 값·날짜 수와
+현재 report만으로 통계·gate·지속성을 계산하며 DB나 cache를 읽지 않는다.
+
+`MonitorHistoryDayRequest`는 날짜 lower/upper와 exact start, 회차 cutoff를 별도로 가진다.
+reader는 최대64개의 복사된 값을 순서대로 반환한다. 실패하면 count=0이고 caller의
+values를 변경하지 않으며 statement reset/clear를 수행한다. 이 원자적인 출력 때문에
+성공한 DB 조회 뒤 최대64 doubles의 stack→caller 복사1회가 추가된다. heap 할당이나
+추가 SQL은 없다. index/SQL은 storage, 반복 날짜 범위와 통계·학습 정책은 detection에서
+찾을 수 있다.
+
+캐시는 scope의 store identity/cutoff/선택 version에 한정한다. 키는 program/metric/
+날짜 lower/min(date upper, exact start)이고4096 entries/8192 slots와 기존 hash/probe를
+유지한다. 첫 lazy calloc 실패는 그 회차의 재할당 시도를 중단하고 SQL로 fallback한다.
+용량을 채우면 기존 entry를 유지하고 새 key는 SQL로 처리한다. 일부 SELECT 결과를
+캐시에 공개하지 않는다. engine은 trim/rollback/close/다음 begin 전에 clear한다.
+
+`detection/monitor_policy.h`의 상수는 기존값을 모은 것이며 runtime 설정이 아니다.
+SQL의 literal version1·cap64와 C 상수의 일치, 대표 선택·exact start/cutoff는 독립
+검사로 확인한다. SQL 변경과 C 정책 변경을 분리해서 검토하되 결과 의미를 함께 검증한다.
 
 ## 비교 대상과 준비 조건
 

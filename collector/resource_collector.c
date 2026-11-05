@@ -1,9 +1,12 @@
+/* Toolhelp로 한 회차를 열거하고 프로세스별 API 결과를 순수 계산부에 전달한다.
+ * 수집기는 이전 카운터·신원 상태를 보관하며, 반환 배치와 표시 메타데이터는 각각 독립 소유다. */
 #define WIN32_LEAN_AND_MEAN
 #include <windows.h>
 #include <tlhelp32.h>
 #include <psapi.h>
 
 #include "resource_collector.h"
+#include "resource_display.h"
 #include "resource_core.h"
 
 #include <math.h>
@@ -72,7 +75,7 @@ static ResourceStatus utf8_name(const WCHAR *wide, char **out, DWORD *error)
     *error = 0;
     if (length == 0) {
         *error = GetLastError();
-        return RESOURCE_OK; /* Field failure, not entire batch failure. */
+        return RESOURCE_OK; /* 해당 필드의 실패이며 회차 전체 실패는 아니다. */
     }
     name = (char *)malloc((size_t)length);
     if (name == NULL) {
@@ -90,7 +93,7 @@ static ResourceStatus utf8_name(const WCHAR *wide, char **out, DWORD *error)
 
 static ResourceStatus read_process(uint32_t pid, RcRawSample *raw, char **name,
     DWORD *open_error, DWORD *times_error, DWORD *memory_error, DWORD *io_error,
-    DWORD *name_error)
+    DWORD *name_error, ResourceDisplayInfo *display)
 {
     HANDLE process;
     FILETIME creation, exit_time, kernel, user;
@@ -108,10 +111,11 @@ static ResourceStatus read_process(uint32_t pid, RcRawSample *raw, char **name,
     if (process == NULL) {
         *open_error = GetLastError();
     } else {
+        if (display) display->attempted_fields |= RESOURCE_QUERY_TIMES;
         if (GetProcessTimes(process, &creation, &exit_time, &kernel, &user)) {
             raw->cpu_qpc = qpc_now();
             raw->creation_100ns = filetime_value(creation);
-            /* Zero creation cannot establish a trustworthy instance identity. */
+            /* 생성시각 0으로는 인스턴스 신원을 확인할 수 없다. */
             raw->identity_valid = raw->creation_100ns != 0;
             kernel_value = filetime_value(kernel);
             user_value = filetime_value(user);
@@ -124,12 +128,14 @@ static ResourceStatus read_process(uint32_t pid, RcRawSample *raw, char **name,
         }
         memset(&memory, 0, sizeof(memory));
         memory.cb = sizeof(memory);
+        if (display) display->attempted_fields |= RESOURCE_QUERY_MEMORY;
         if (GetProcessMemoryInfo(process, &memory, sizeof(memory))) {
             raw->memory_valid = 1;
             raw->working_set_bytes = (uint64_t)memory.WorkingSetSize;
         } else {
             *memory_error = GetLastError();
         }
+        if (display) display->attempted_fields |= RESOURCE_QUERY_IO;
         if (GetProcessIoCounters(process, &io)) {
             raw->io_qpc = qpc_now();
             raw->io_valid = 1;
@@ -138,8 +144,9 @@ static ResourceStatus read_process(uint32_t pid, RcRawSample *raw, char **name,
         } else {
             *io_error = GetLastError();
         }
-        /* A snapshot name may belong to an exited instance whose PID was reused.
-         * Resolve the basename through the exact handle used for all counters. */
+        /* 목록 이름은 PID가 재사용되기 전의 종료된 인스턴스 이름일 수 있다.
+         * 모든 카운터를 읽은 바로 그 핸들에서 실행 파일명을 구한다. */
+        if (display) display->attempted_fields |= RESOURCE_QUERY_NAME;
         if (QueryFullProcessImageNameW(process, 0, image_path, &path_length)) {
             const WCHAR *basename = image_path;
             const WCHAR *cursor;
@@ -151,6 +158,16 @@ static ResourceStatus read_process(uint32_t pid, RcRawSample *raw, char **name,
             status = utf8_name(basename, name, name_error);
         } else {
             *name_error = GetLastError();
+        }
+        if (display && (*times_error || *memory_error || *io_error || *name_error)) {
+            DWORD exit_code = STILL_ACTIVE;
+            display->attempted_fields |= RESOURCE_QUERY_EXIT;
+            if (GetExitCodeProcess(process, &exit_code)) {
+                display->exit_code = exit_code;
+                display->exit_observed = exit_code != STILL_ACTIVE;
+            } else {
+                display->exit_query_error = GetLastError();
+            }
         }
         CloseHandle(process);
     }
@@ -213,8 +230,24 @@ void resource_batch_free(ResourceBatch *batch)
     memset(batch, 0, sizeof(*batch));
 }
 
+void resource_display_batch_free(ResourceDisplayBatch *display)
+{
+    size_t i;
+    if (display == NULL) return;
+    for (i = 0; i < display->count; ++i)
+        free((void *)display->items[i].snapshot_name_utf8);
+    free(display->items);
+    memset(display, 0, sizeof(*display));
+}
+
 ResourceStatus resource_collector_collect(ResourceCollector *collector,
     ResourceBatch *out, uint32_t *win32_error)
+{
+    return resource_collector_collect_display(collector, out, NULL, win32_error);
+}
+
+ResourceStatus resource_collector_collect_display(ResourceCollector *collector,
+    ResourceBatch *out, ResourceDisplayBatch *display, uint32_t *win32_error)
 {
     HANDLE snapshot = INVALID_HANDLE_VALUE;
     PROCESSENTRY32W entry;
@@ -228,7 +261,8 @@ ResourceStatus resource_collector_collect(ResourceCollector *collector,
     if (win32_error != NULL) {
         *win32_error = 0;
     }
-    if (collector == NULL || out == NULL || out->items != NULL || out->count != 0) {
+    if (collector == NULL || out == NULL || out->items != NULL || out->count != 0 ||
+            (display && (display->items != NULL || display->count != 0))) {
         return RESOURCE_INVALID_ARGUMENT;
     }
     memset(out, 0, sizeof(*out));
@@ -257,6 +291,7 @@ ResourceStatus resource_collector_collect(ResourceCollector *collector,
     }
     while (has_entry) {
         ResourceData *item;
+        ResourceDisplayInfo *display_item = NULL;
         RcRawSample raw;
         DWORD open_error, times_error, memory_error, io_error, name_error;
         char *name;
@@ -266,7 +301,8 @@ ResourceStatus resource_collector_collect(ResourceCollector *collector,
             RcState *new_states;
             if (new_capacity < capacity ||
                     new_capacity > SIZE_MAX / sizeof(*new_items) ||
-                    new_capacity > SIZE_MAX / sizeof(*new_states)) {
+                    new_capacity > SIZE_MAX / sizeof(*new_states) ||
+                    (display && new_capacity > SIZE_MAX / sizeof(*display->items))) {
                 status = RESOURCE_OUT_OF_MEMORY;
                 goto failed;
             }
@@ -284,12 +320,43 @@ ResourceStatus resource_collector_collect(ResourceCollector *collector,
                 goto failed;
             }
             next_states = new_states;
+            if (display) {
+                ResourceDisplayInfo *new_display = (ResourceDisplayInfo *)realloc(
+                    display->items, new_capacity * sizeof(*new_display));
+                if (new_display == NULL) {
+                    status = RESOURCE_OUT_OF_MEMORY;
+                    goto failed;
+                }
+                display->items = new_display;
+            }
             capacity = new_capacity;
         }
+        if (display) {
+            display_item = &display->items[out->count];
+            memset(display_item, 0, sizeof(*display_item));
+            display_item->pid = entry.th32ProcessID;
+            display_item->special_process = entry.th32ProcessID == 0 ?
+                RESOURCE_SPECIAL_IDLE : entry.th32ProcessID == 4 ?
+                RESOURCE_SPECIAL_SYSTEM : RESOURCE_SPECIAL_NONE;
+        }
         status = read_process(entry.th32ProcessID, &raw, &name, &open_error,
-            &times_error, &memory_error, &io_error, &name_error);
+            &times_error, &memory_error, &io_error, &name_error, display_item);
         if (status != RESOURCE_OK) {
             goto failed;
+        }
+        if (display_item) {
+            display_item->creation_time_utc_100ns = raw.identity_valid ? raw.creation_100ns : 0;
+            display_item->measured_at_utc_100ns = raw.utc_100ns;
+            if (name) display_item->name_source = RESOURCE_NAME_HANDLE;
+            else if (entry.szExeFile[0]) {
+                char *snapshot_name = NULL;
+                DWORD snapshot_error = 0;
+                status = utf8_name(entry.szExeFile, &snapshot_name, &snapshot_error);
+                if (status != RESOURCE_OK) goto failed;
+                display_item->snapshot_name_utf8 = snapshot_name;
+                display_item->snapshot_name_error = snapshot_error;
+                if (snapshot_name) display_item->name_source = RESOURCE_NAME_LIST;
+            }
         }
         item = &out->items[out->count];
         rc_core_update(&raw, find_state(collector, raw.pid),
@@ -309,6 +376,7 @@ ResourceStatus resource_collector_collect(ResourceCollector *collector,
             item->valid_fields |= RESOURCE_VALID_FOREGROUND;
         }
         ++out->count;
+        if (display) display->count = out->count;
         has_entry = Process32NextW(snapshot, &entry);
         if (!has_entry) {
             error = GetLastError();
@@ -318,6 +386,7 @@ ResourceStatus resource_collector_collect(ResourceCollector *collector,
             }
         }
     }
+    /* 전체 열거가 끝난 뒤에만 다음 카운터 상태를 채택한다. */
     CloseHandle(snapshot);
     clear_states(collector);
     if (out->count > 1) {
@@ -335,6 +404,7 @@ failed:
     }
     free(next_states);
     resource_batch_free(out);
+    resource_display_batch_free(display);
     clear_states(collector);
     if (win32_error != NULL) {
         *win32_error = error;

@@ -4,7 +4,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <math.h>
-#include "monitor_internal.h"
+#include "../support/monitor_fixture.h"
 
 /* Synthetic mature-history workload. Real waits/QPC and optional self-process
  * collector observations are explicitly separate from represented history. */
@@ -31,7 +31,7 @@ static double milliseconds(LARGE_INTEGER a, LARGE_INTEGER b)
 static int execute(Workload *w, const char *sql)
 {
     char *error = NULL;
-    int rc = sqlite3_exec(w->engine->db, sql, NULL, NULL, &error);
+    int rc = sqlite3_exec(monitor_fixture_db(w->engine), sql, NULL, NULL, &error);
     if (rc != SQLITE_OK) printf("SQL_ERROR %s\n", error ? error : "unknown");
     sqlite3_free(error); CHECK(rc == SQLITE_OK); return rc == SQLITE_OK;
 }
@@ -124,7 +124,7 @@ static int initialize(Workload *w, const char *kind, unsigned count, unsigned da
         kind, count, w->groups, days, w->density, (unsigned long long)w->utc, w->filename);
     {
         sqlite3_stmt *configuration = NULL;
-        CHECK(sqlite3_prepare_v2(w->engine->db,"PRAGMA main.cache_size",-1,&configuration,NULL)==SQLITE_OK);
+        CHECK(sqlite3_prepare_v2(monitor_fixture_db(w->engine),"PRAGMA main.cache_size",-1,&configuration,NULL)==SQLITE_OK);
         CHECK(sqlite3_step(configuration)==SQLITE_ROW);
         printf("PAGE_CACHE_CONFIG case=%s main_cache_size=%d (negative value is approximate KiB target, not process memory limit)\n",
             kind,sqlite3_column_int(configuration,0));
@@ -140,10 +140,10 @@ static int seed(Workload *w)
     sqlite3_int64 count = 0;
     QueryPerformanceCounter(&a);
     if (!execute(w, "BEGIN IMMEDIATE")) return 0;
-    CHECK(sqlite3_prepare_v2(w->engine->db,
+    CHECK(sqlite3_prepare_v2(monitor_fixture_db(w->engine),
         "INSERT INTO aggregate_window(run_id,program_id,pid,creation,start_utc,end_utc,duration,version) VALUES(?,?,?,?,?,?,60,1)",
         -1, &window, NULL) == SQLITE_OK);
-    CHECK(sqlite3_prepare_v2(w->engine->db,
+    CHECK(sqlite3_prepare_v2(monitor_fixture_db(w->engine),
         "INSERT INTO aggregate_metric VALUES(?,?,?,60,20,1,2,'SYNTHETIC mature seed',896,14,896,0,0,0,0)",
         -1, &metric, NULL) == SQLITE_OK);
     for (group = 0; group < w->groups; ++group) for (day = 0; day < w->days; ++day)
@@ -156,7 +156,7 @@ static int seed(Workload *w)
             sqlite3_bind_int64(window, 4, (sqlite3_int64)(w->utc - 20 * MONITOR_DAY_TICKS + process));
             sqlite3_bind_int64(window, 5, (sqlite3_int64)(end - 60 * MONITOR_TICKS_PER_SECOND));
             sqlite3_bind_int64(window, 6, (sqlite3_int64)end);
-            CHECK(sqlite3_step(window) == SQLITE_DONE); sqlite3_reset(window); id = sqlite3_last_insert_rowid(w->engine->db);
+            CHECK(sqlite3_step(window) == SQLITE_DONE); sqlite3_reset(window); id = sqlite3_last_insert_rowid(monitor_fixture_db(w->engine));
             for (m = 0; m < 4; ++m) {
                 double value = m == MONITOR_CPU ? 1 + group % 5 : m == MONITOR_RAM ? 67108864.0 + group * 1048576.0 : 0;
                 sqlite3_bind_int64(metric, 1, id); sqlite3_bind_int(metric, 2, (int)m); sqlite3_bind_double(metric, 3, value);
@@ -173,12 +173,12 @@ static int seed(Workload *w)
 static void profile_reset(Workload *w)
 {
     int current,highwater;
-    sqlite3_stmt_status(w->engine->baseline_query, SQLITE_STMTSTATUS_RUN, 1);
-    sqlite3_stmt_status(w->engine->baseline_query, SQLITE_STMTSTATUS_VM_STEP, 1);
-    sqlite3_stmt_status(w->engine->baseline_query, SQLITE_STMTSTATUS_FULLSCAN_STEP, 1);
-    sqlite3_stmt_status(w->engine->baseline_query, SQLITE_STMTSTATUS_SORT, 1);
-    CHECK(sqlite3_db_status(w->engine->db,SQLITE_DBSTATUS_CACHE_HIT,&current,&highwater,1)==SQLITE_OK);
-    CHECK(sqlite3_db_status(w->engine->db,SQLITE_DBSTATUS_CACHE_MISS,&current,&highwater,1)==SQLITE_OK);
+    sqlite3_stmt_status(monitor_fixture_baseline_statement(w->engine), SQLITE_STMTSTATUS_RUN, 1);
+    sqlite3_stmt_status(monitor_fixture_baseline_statement(w->engine), SQLITE_STMTSTATUS_VM_STEP, 1);
+    sqlite3_stmt_status(monitor_fixture_baseline_statement(w->engine), SQLITE_STMTSTATUS_FULLSCAN_STEP, 1);
+    sqlite3_stmt_status(monitor_fixture_baseline_statement(w->engine), SQLITE_STMTSTATUS_SORT, 1);
+    CHECK(sqlite3_db_status(monitor_fixture_db(w->engine),SQLITE_DBSTATUS_CACHE_HIT,&current,&highwater,1)==SQLITE_OK);
+    CHECK(sqlite3_db_status(monitor_fixture_db(w->engine),SQLITE_DBSTATUS_CACHE_MISS,&current,&highwater,1)==SQLITE_OK);
 }
 static void inspect_ready(Workload *w, size_t count, unsigned streak)
 {
@@ -209,18 +209,18 @@ static void run_case(const char *kind, unsigned count, unsigned days, const char
     printf("MEASURE_BEGIN case=%s whole_batch_instances=%u\n", kind, count); fflush(stdout);
     QueryPerformanceCounter(&before); CHECK(ingest(&w, 3, 0)); QueryPerformanceCounter(&after);
     close_ms = milliseconds(before, after); inspect_ready(&w, count, 1);
-    CHECK(sqlite3_db_status(w.engine->db,SQLITE_DBSTATUS_CACHE_HIT,&cache_hits,&highwater,0)==SQLITE_OK);
-    CHECK(sqlite3_db_status(w.engine->db,SQLITE_DBSTATUS_CACHE_MISS,&cache_misses,&highwater,0)==SQLITE_OK);
-    CHECK(sqlite3_db_status(w.engine->db,SQLITE_DBSTATUS_CACHE_USED,&cache_used,&highwater,0)==SQLITE_OK);
+    CHECK(sqlite3_db_status(monitor_fixture_db(w.engine),SQLITE_DBSTATUS_CACHE_HIT,&cache_hits,&highwater,0)==SQLITE_OK);
+    CHECK(sqlite3_db_status(monitor_fixture_db(w.engine),SQLITE_DBSTATUS_CACHE_MISS,&cache_misses,&highwater,0)==SQLITE_OK);
+    CHECK(sqlite3_db_status(monitor_fixture_db(w.engine),SQLITE_DBSTATUS_CACHE_USED,&cache_used,&highwater,0)==SQLITE_OK);
     printf("MATURE_CLOSE case=%s instances=%u paths=%u whole_ingest_ms=%.3f snapshot_store_ms=%.3f completed_windows=%zu n=%u dates=%u minutes=%u CPU_state=%s CPU_streak=%u RAM_samples=%u query_runs=%d VM_steps=%d fullscan_steps=%d sorts=%d exact_start_first=%llu exact_start_last=%llu\n",
         kind, count, w.groups, close_ms, w.snapshot->store_ms, w.snapshot->completed_windows,
         w.snapshot->rows[0].metric[0].count, w.snapshot->rows[0].metric[0].days, w.snapshot->rows[0].metric[0].minutes,
         monitor_state_name(w.snapshot->rows[0].metric[0].state), w.snapshot->rows[0].metric[0].streak,
         w.snapshot->rows[0].metric[1].valid_samples,
-        sqlite3_stmt_status(w.engine->baseline_query, SQLITE_STMTSTATUS_RUN, 0),
-        sqlite3_stmt_status(w.engine->baseline_query, SQLITE_STMTSTATUS_VM_STEP, 0),
-        sqlite3_stmt_status(w.engine->baseline_query, SQLITE_STMTSTATUS_FULLSCAN_STEP, 0),
-        sqlite3_stmt_status(w.engine->baseline_query, SQLITE_STMTSTATUS_SORT, 0),
+        sqlite3_stmt_status(monitor_fixture_baseline_statement(w.engine), SQLITE_STMTSTATUS_RUN, 0),
+        sqlite3_stmt_status(monitor_fixture_baseline_statement(w.engine), SQLITE_STMTSTATUS_VM_STEP, 0),
+        sqlite3_stmt_status(monitor_fixture_baseline_statement(w.engine), SQLITE_STMTSTATUS_FULLSCAN_STEP, 0),
+        sqlite3_stmt_status(monitor_fixture_baseline_statement(w.engine), SQLITE_STMTSTATUS_SORT, 0),
         (unsigned long long)w.snapshot->rows[0].metric[0].window_start_utc_100ns,
         (unsigned long long)w.snapshot->rows[count-1].metric[0].window_start_utc_100ns); fflush(stdout);
     printf("PAGE_CACHE_CLOSE case=%s connection_hits=%d connection_misses=%d cache_used_bytes=%d (whole connection during mature close)\n",

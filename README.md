@@ -1,78 +1,89 @@
 # PC-Resource-Monitor
 
-Windows C 자원 수집기와 SQLite 로컬 기록, 개인화 Baseline 비교, Win32 GUI를 통합한 팀 프로젝트다. 장기 개인 패턴과 현재 관측창을 비교해 **자원 이상 후보**를 보여 준다. 악성·불필요 판정과 자동 프로세스 종료는 수행하지 않는다.
+Windows C 자원 수집기, SQLite 로컬 이력, 개인화 Baseline 비교와 Win32 GUI를 연결한 팀 프로젝트다. 현재 사용량과 평소 패턴의 차이를 근거와 함께 보여 준다. 자원 사용만으로 악성·불필요 여부를 판정하거나 프로세스를 자동 종료하지 않는다.
 
-원본 저장소: [HighKcal/PC-Resource-Monitor](https://github.com/HighKcal/PC-Resource-Monitor). 협업은 **원본 → 개인 Fork → 기능 브랜치 → 원본 main으로 PR → 검토·병합** 순서다. [영역별 필독 문서](docs/team-guide.md)와 [CONTRIBUTING](CONTRIBUTING.md)부터 읽는다.
+중간 제출본은 [원본 저장소](https://github.com/HighKcal/PC-Resource-Monitor)의 `main` 브랜치를 기준으로 받는다. 후속 변경은 작업 브랜치에서 개발하고 PR로 `main`에 통합한다. 자세한 절차는 [Fork·PR 안내](CONTRIBUTING.md)를 따른다.
 
-## 구현과 책임
+## 현재 구현 범위
 
-| 영역 | 현재 책임 |
-|---|---|
-| collector | Windows API, PID+생성시각, 자원 단위와 필드 유효성, 경로 신원 어댑터 |
-| storage | SQLite, 스키마, 저장·조회, 보관, 피드백 원장 |
-| detection | 개인화 Baseline, 통계·상한·지속성·이상 후보 정책 |
-| gui | 목록·상세·상태 표시, 선택·Pause/Resume·사용자 피드백 |
+- PID+생성시각으로 연결하는 한 회차 수집, 필드별 유효성·실패 진단, 실제 QPC 간격에 따른 CPU·I/O 계산.
+- SQLite 원시 기록·완료 관측창·피드백 저장, strict-past 개인화 Baseline, 날짜별 대표 선택과 회차 캐시.
+- A안 Win32 화면: 검색·정렬·상세, 현재 사용량과 마지막 완료창 비교, Pause/Resume, 기간 한정 피드백. 접수한 명령의 결과 전달과 성공 표시 수명을 구분한다.
+- 프로그램 그룹의 최신 사용량 합계, 구성원 펼침과 세션 내 사용자 소속 지정. 자동 그룹은 부모 관계 기반 추정이며 그룹 Baseline은 만들지 않는다.
+- 별도 변화 사건 prototype: capture·사건 처리·저장·평가·CSV export·full/retained replay. 보관 정리는 남아 있는 기록의 참조와 종료 근거를 보호한다.
+- engine/store/window/source, 과거 조회/cache/Baseline 정책, prototype 책임별 컴파일 단위와 한국어 설명 주석. 독립 oracle과 실제 도달을 확인하는 실패주입 시험을 유지한다.
 
-위 표는 영역별 유지보수 책임을 설명한다. 공통 engine·헤더·빌드·테스트는 영향받는 영역의 담당자가 함께 검토한다. GitHub 사용자명을 추정한 CODEOWNERS는 두지 않았다.
+AI 설명·외부 악성코드 탐지 연동은 설계 단계다. 실제 외부 API 호출·파일 업로드·격리는 구현하지 않았다.
 
-```text
-collector/              Windows 수집·계산·monitor identity adapter
-storage/                SQLite backend·내부 helper·실행 스키마·schema.sql
-detection/              Baseline 통계·학습 gate·이상 후보 판정
-gui/                    Win32 GUI 및 worker 실행 흐름
-engine/                 batch 트랜잭션·관측창·snapshot 통합, 내부 상태
-include/                공개 C 자료형과 API (기존 계약 유지)
-app/                    수집기 콘솔 실행 예제
-tests/collector/        계산·실제 Windows 수집 테스트
-tests/integration/      저장·관측창·Baseline·실패·회귀 테스트
-tests/performance/      성숙 Baseline 합성 부하 도구
-tests/review-monitor/   기존 별도 검토 테스트와 진단 도구
-third_party/sqlite/     고정 SQLite 3.54.1 소스·헤더·출처
-scripts/                MSVC 탐색·빌드·테스트
-docs/                   팀 안내·아키텍처·계약·검증
-.github/                PR 양식
-```
+## 개발 환경과 빌드
 
-## 빠른 빌드와 실행
+Windows x64, Visual Studio 또는 Build Tools의 **Desktop development with C++**, Windows SDK, Git이 필요하다. 확장 시험 프로필과 vendor 해시 검사에는 Python 3가 필요하며 외부 Python 패키지는 사용하지 않는다. 기본 `.cmd` 빌드는 Python 없이 동작한다.
 
-Windows x64, Visual Studio의 **Desktop development with C++**, Windows SDK가 필요하다. PowerShell에서 저장소 루트 기준으로 실행한다. scripts는 vswhere로 x64 MSVC를 찾는다. C17, 제품 `/W4 /WX`, `/O2 /MT`, UTF-8 소스이며 SQLite만 vendor 경고를 격리한다. 빌드·실행에 인터넷은 필요하지 않다.
+PowerShell에서 다음과 같이 받는다. 이미 checkout했다면 저장소 루트에서 빌드부터 실행한다.
 
 ```powershell
+git clone --branch main https://github.com/HighKcal/PC-Resource-Monitor.git
+cd PC-Resource-Monitor
 .\build.cmd
 .\build-monitor.cmd
+.\build-prototype.cmd build-prototype build-monitor
 .\scripts\test.cmd
-.\build\resource_console.exe --self --count 3
-.\build-monitor\monitor_gui.exe --db build-monitor\my-local-monitor.sqlite
+.\build-prototype\test_experiment.exe
+python -X utf8 tests\review-monitor\verify_vendor.py
 ```
 
-기존 루트 build 명령은 새 scripts의 진입점으로 유지했다. 수집기 static library와 콘솔, 하나의 통합 `monitor_gui.exe`, 테스트가 생성된다. 별도 출력 폴더를 지정한 클린 빌드와 확장 검증은 [development](docs/development.md)에 있다. SQLite는 [출처·해시·배포 조건](third_party/sqlite/PROVENANCE.md)을 유지한다.
+`build/`에 수집 콘솔·계산/Windows/표시 시험, `build-monitor/`에 통합 GUI·monitor/grouping 라이브러리와 시험, `build-prototype/`에 prototype CLI·GUI·시험이 생성된다. scripts는 `vswhere`로 x64 MSVC를 찾는다. 제품은 C17, `/W4 /WX /O2 /MT /utf-8`로 빌드하며 SQLite의 경고는 별도 취급한다.
 
-짧은 합성 통합 실행은 다음과 같다. 합성도 실제 여러 날짜 학습을 대신하지 않으며 별도 DB를 사용한다.
+SQLite 3.54.1 소스·헤더와 [출처·해시·배포 조건](third_party/sqlite/PROVENANCE.md)을 동봉하므로 checkout 후 빌드에 네트워크가 필요 없다. `storage/monitor_schema.h`는 실행에 필요한 생성 헤더이므로 `storage/schema.sql`과 함께 관리한다. 설치 프로그램이나 과거 실행물을 요구하지 않는다. 별도 출력 경로와 전체 22개 빌드 프로필은 [개발 안내](docs/development.md), 시험 범위는 [tests 안내](tests/README.md)에 있다.
+
+## 실행과 화면 해석
 
 ```powershell
-.\build-monitor\monitor_gui.exe --headless --synthetic --db build-monitor\synthetic-demo.sqlite --count 23 --interval-ms 100
+.\build\resource_console.exe --self --count 3
+# 실제 로컬 수집·저장. 아직 없는 DB 이름을 골라 실행한다.
+$gui = (Resolve-Path .\build-monitor\monitor_gui.exe).Path
+$db = Join-Path $PWD 'build-monitor\my-local-monitor.sqlite'
+Start-Process -FilePath $gui -ArgumentList ('--db "{0}"' -f $db) -WorkingDirectory $PWD.Path
+# 수집·DB 없이 고정 합성 화면만 확인하려면:
+Start-Process -FilePath $gui -ArgumentList '--ui-demo' -WorkingDirectory $PWD.Path
 ```
 
-## 데이터 흐름과 인터페이스
+주 GUI는 `requireAdministrator` 매니페스트를 포함하므로 Windows가 UAC 승격을 요청한다. `--headless`, `--synthetic`, `--ui-demo`에도 같은 정책이 적용된다. 관리자 실행도 모든 프로세스의 정보 취득을 보장하지 않는다. 콘솔·시험·별도 prototype 실행물에는 이 승격 정책을 추가하지 않았다. 실제 DB에는 프로세스명과 경로가 들어가므로 로컬에만 보관한다.
 
-```text
-Windows API → collector → ResourceBatch → engine
-                                      ↘ storage: raw/완료창 transaction
-                                       ↘ detection: strictly past Baseline
-                                        → 독립 MonitorSnapshot → GUI
-GUI 피드백 → worker → storage feedback (학습값은 유지)
+- CPU는 **전체 논리 CPU 용량 대비 %**, RAM 원자료는 **WorkingSetSize bytes**, I/O는 **프로세스 읽기·쓰기 B/s**다. GUI는 RAM을 십진 GB, I/O를 MB/s로 표시한다.
+- `NA`는 결측이며 유효한 0과 다르다. 작은 양수는 표시 정밀도에 따라 `<0.01`로 보인다. 실제 QPC 구간과 기록용 UTC는 별개다.
+- 현재 수치와 마지막 완료창 비교는 시점이 다르다. 학습 부족·측정 불가·오래된 결과를 정상으로 바꾸지 않는다. 기본 3초는 처리 **후 대기**이므로 정확한 3초 관측 간격을 보장하지 않는다.
+- 그룹 `*partial X/Y`는 유효한 X개 구성원의 부분 합계다. Working Set 합은 공유 페이지를 중복 계산할 수 있다. 사용자 지정은 세션에만 유지되며 Resume·재시작·PID 재사용에 승계하지 않는다. 피드백은 개별 프로세스에서 사용한다.
+
+자세한 조작은 [실제 C 화면](docs/native-ui.md), [그룹 계약](docs/contracts/process-grouping.md)을 참고한다. [HTML A/B 시안](ux/monitor-prototype/README.md)은 합성 디자인 참고 자료이며 실제 수집 화면이나 판정 결과가 아니다.
+
+## 변화 사건 prototype
+
+다음 demo는 **3 UTC 날짜의 합성 입력**을 실제 집계·Baseline 경로로 처리한다. 두 DB는 존재하지 않는 새 이름으로 지정한다.
+
+```powershell
+.\build-prototype\prototype_cli.exe demo --source build-prototype\demo-01-monitor.sqlite --db build-prototype\demo-01-events.sqlite
+.\build-prototype\prototype_gui.exe --db build-prototype\demo-01-events.sqlite
 ```
 
-[resource_collector.h](include/resource_collector.h)의 collect는 한 회차만 수집한다. batch 배열·문자열은 batch가 소유하고 `resource_batch_free`로 해제한다. CPU는 전체 논리 CPU 용량 대비 %, RAM은 WorkingSetSize bytes, I/O는 프로세스 read/write B/s다. 실제 QPC 간격과 기록용 UTC를 분리하고, PID+생성시각으로 인스턴스를 연결한다. 결측은 0으로 해석하지 않는다.
+사건 평가를 별도 원장에 저장하며 Baseline 학습이나 알림 억제에 반영하지 않는다. 실제 수집·조회·평가·export·replay 명령과 28일 평가 **계획**은 [prototype 안내](docs/prototype-guide.md)에 있다. 합성 시험은 실제 장기 학습의 정확도나 사용자 효용을 증명하지 않는다.
 
-[monitor.h](include/monitor.h)는 worker 전용 engine API와 snapshot 소유권을 정의한다. engine은 한 batch의 원자적 저장과 60~75초 관측창을 연결하고, detection은 현재 창 이전의 과거만 비교한다. 최신 종료 분 대표 선택·날짜 cap·회차 cutoff와 연결별 16MiB SQLite 페이지 cache 설정을 보존했다. GUI는 복사된 snapshot만 소비하며 now와 마지막 완료창을 구분한다. [아키텍처와 의존 관계](docs/architecture.md), [담당별 계약](docs/team-guide.md)에 상세 규격이 있다.
+## 구조와 읽는 순서
 
-## 검증과 한계
+| 경로 | 책임 |
+|---|---|
+| `collector/`, `include/resource_*.h` | Windows 수집, 순수 계산, 단위·유효성·표시 진단 |
+| `engine/` | ingest 순서, 인스턴스·관측창, 실패 복구, commit 뒤 결과 공개 |
+| `storage/` | opaque store의 DB·statement, 값 저장, 날짜별 과거 조회·source 읽기 |
+| `detection/` | 회차 history/cache와 통계·학습·판정 정책 |
+| `prototype/` | coordinator, capture, store, reducer, history/export, replay, 독립 retention |
+| `grouping/`, `gui/` | 관계·세션 소속·합계, worker/UI 전달과 화면 |
+| `app/`, `scripts/`, `tests/` | CLI, 공통 컴파일 목록, 회귀·실패주입·합성 부하 도구 |
 
-이번 구조 정리의 클린 빌드·전후 회귀·공개 점검 결과는 [validation](docs/validation.md)에 있다. 공개 API와 DB 스키마는 유지했으며 C 파일 위치와 내부 연결 이름은 변경했다. 수동 소스 목록을 사용하는 통합자는 [migration](docs/migration.md)을 확인한다.
+[팀 읽기 순서](docs/team-guide.md) → [아키텍처·소유권](docs/architecture.md) → [개발 명령](docs/development.md) → [검증 결과와 한계](docs/validation.md)를 참고한다. 내부 경로를 직접 사용하던 통합자는 [이행 안내](docs/migration.md)를 확인한다. 공개 API/ABI·기존 DB 형식과 수집·판정 의미는 유지했다.
 
-정확한 3초 수집 cadence, 모든 PC에서의 성능 상한, 실제 여러 날 학습의 오탐·미탐 정확도는 보장하지 않는다. 기본 3초는 처리 후 대기다. 경로 문자열별 개별 인스턴스 분포이며 앱 전체 합계·파일 버전·사용자 필요성은 확인하지 않는다. GUI의 DPI·접근성·장시간 사용과 과거 OS 호환성은 추가 검증 대상이다.
+## 검증 상태와 공개 범위
 
-DB와 WAL/SHM, 프로세스 목록·개인 경로, 화면 캡처·측정 로그, 빌드 산출물과 자격증명은 공개하지 않는다. 로컬 과거 연구/작업 로그는 보존하고 공개용 계약·검증 문서를 별도로 정리했다. 프로젝트 소스의 배포 라이선스는 팀이 결정해야 한다. SQLite의 public-domain 조건은 별도로 명시한다.
+이번 제출 준비에서 실행한 깨끗한 빌드와 과거 기능·실패·성능 검증을 [validation](docs/validation.md)에 구분해 기록한다. 성숙한 고유 경로 다수의 완료 회차는 3초를 넘는 비용이 남아 있다. 실제 전경 관리자 GUI 전체 조작, 외부 UI 조회가 없는 최종 GUI 성능, 장기 효용·누수·모든 동시 쓰기 실패는 완료로 주장하지 않는다.
 
-AI 설명, 역할 근거, 별도 악성코드 탐지 프로그램 연동은 **설계 단계의 선택 기능**이다. 실제 API 호출·파일 업로드·탐지 엔진 복제·자동 종료/격리는 구현하지 않았다. 자원 후보와 보안 결과를 하나의 안전/불필요 점수로 합치지 않는다. 향후 비동기 식별·실패·만료 계약은 [확장 경계](docs/architecture.md#선택적-확장-경계)를 따른다.
+실사용 DB·WAL/SHM, 개인 프로세스 목록·측정 로그·화면 캡처, 자격증명, 빌드 산출물, 과거 보존본과 로컬 작업 로그는 업로드하지 않는다. 필요한 합성 fixture·ABI 기대값·SQLite·실행 스키마는 포함한다. 프로젝트 자체의 배포 라이선스는 팀 결정이 필요하며 SQLite의 public-domain 조건은 별도다.

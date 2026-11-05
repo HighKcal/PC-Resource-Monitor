@@ -3,7 +3,7 @@
 
 #include "resource_collector.h"
 
-/* Private seam: production and controlled tests share this state transition. */
+/* 내부 계산 경계. 실제 수집기와 통제된 시험이 같은 상태 전이를 사용한다. */
 typedef struct RcRawSample {
     uint32_t pid;
     uint64_t utc_100ns;

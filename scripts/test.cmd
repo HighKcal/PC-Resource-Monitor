@@ -9,7 +9,11 @@ if not defined MONITOR_OUT set "MONITOR_OUT=build-monitor"
 if errorlevel 1 goto failed
 "%COLLECTOR_OUT%\test_windows.exe"
 if errorlevel 1 goto failed
+"%COLLECTOR_OUT%\test_display.exe"
+if errorlevel 1 goto failed
 "%MONITOR_OUT%\test_monitor.exe"
+if errorlevel 1 goto failed
+"%MONITOR_OUT%\test_grouping.exe"
 if errorlevel 1 goto failed
 popd
 exit /b 0

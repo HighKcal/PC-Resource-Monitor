@@ -1,3 +1,4 @@
+/* OS 호출 없이 두 관측의 신원·QPC·누적 카운터를 비교해 필드별 유효성을 계산한다. */
 #include "resource_core.h"
 
 #include <math.h>
@@ -48,6 +49,7 @@ void rc_core_update(const RcRawSample *raw, const RcState *previous,
     out->cpu_interval_seconds = NAN;
     out->io_interval_seconds = NAN;
     out->foreground = RESOURCE_FOREGROUND_UNKNOWN;
+    /* 실패를 건너뛰어 오래된 성공값과 차분하지 않도록 실패 상태도 다음 회차에 넘긴다. */
     next->pid = raw->pid;
     next->identity_valid = raw->identity_valid;
     next->creation_100ns = raw->creation_100ns;
@@ -59,6 +61,7 @@ void rc_core_update(const RcRawSample *raw, const RcState *previous,
     next->write_bytes = raw->write_bytes;
     next->cpu_qpc = raw->cpu_qpc;
     next->io_qpc = raw->io_qpc;
+    /* RAM은 현재 절대값이므로 신원·차분 성공 여부와 별도로 유효할 수 있다. */
     if (raw->memory_valid) {
         out->valid_fields |= RESOURCE_VALID_MEMORY;
         out->working_set_bytes = raw->working_set_bytes;

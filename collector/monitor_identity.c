@@ -1,3 +1,5 @@
+/* 원시 수집과 별도로 경로를 조회하되 같은 핸들의 생성시각으로 PID 재사용을 확인한다.
+ * 성공한 경로 사본은 호출자가 소유하며 파일 버전의 동일성까지 확인하지는 않는다. */
 #define WIN32_LEAN_AND_MEAN
 #include <windows.h>
 #include <stdlib.h>

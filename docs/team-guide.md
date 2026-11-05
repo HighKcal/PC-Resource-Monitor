@@ -6,7 +6,7 @@
 2. [CONTRIBUTING](../CONTRIBUTING.md): Fork → Branch → PR → 동기화 절차와 공통 변경 규칙.
 3. [architecture](architecture.md): 모듈 경계, 데이터 흐름, 트랜잭션·소유권.
 4. [development](development.md): 재현 가능한 빌드·테스트·합성 검증 명령.
-5. [validation](validation.md): 이번 구조 변경에서 실행한 검증과 남은 미검증 사항.
+5. [validation](validation.md): 제출본 확인과 기존 검증 근거, 남은 미검증 사항.
 
 ## 영역별 추가 필독
 
@@ -16,11 +16,13 @@
 | storage | [저장 계약](contracts/storage.md), [schema.sql](../storage/schema.sql), [SQLite 출처](../third_party/sqlite/PROVENANCE.md), [monitor.h](../include/monitor.h) | `storage/`. `engine/monitor.c`의 batch 트랜잭션·원시/완료창 기록 연결부와 detection의 SQL 선택 조건을 함께 확인. |
 | detection | [Baseline 계약](contracts/detection.md), [저장 계약](contracts/storage.md), [monitor.h](../include/monitor.h) | `detection/`, `tests/integration/`, `tests/performance/`. 관측창 품질·cutoff는 engine, SQL 준비와 인덱스는 storage에 있으므로 두 영역과 공동 검토. |
 | gui | [GUI 계약](contracts/gui.md), [monitor.h](../include/monitor.h), [수집 계약](contracts/collector.md) | `gui/monitor_gui.c`. snapshot 수명, now/완료창 분리, 결측·학습·STALE·오류 표시, 피드백 전달을 우선 확인. |
+| prototype | [사건 계약](contracts/experiment.md), [source 계약](contracts/source.md), [실행 안내](prototype-guide.md) | `prototype/`의 책임별 TU와 coordinator. core commit 뒤 sidecar 부분 실패·Track 소유권·보관 참조를 함께 확인. |
+| grouping | [그룹 계약](contracts/process-grouping.md) | `grouping/`의 관계 관측·세션 소속·합계. GUI는 원본 snapshot을 변경하지 않는다. |
 
 이 표는 영역별 책임과 검토 경로를 정한 것이다. 실제 GitHub 사용자명은 확인되지 않았으므로 계정·CODEOWNERS를 추정하지 않는다.
 
 ## 첫 기여 전 확인
 
-자신의 Fork를 Clone한 뒤 [development](development.md)의 기본 빌드와 세 테스트를 먼저 실행하고 환경에 따른 차이를 기록한다. 이어서 담당 계약과 코드를 읽고 작은 기능 브랜치에서 변경한다. 공통 변경에는 관련 담당자의 검토를 요청한다.
+자신의 Fork를 Clone한 뒤 [development](development.md)의 기본 빌드·시험을 먼저 실행하고 환경에 따른 차이를 기록한다. 이어서 담당 계약과 코드를 읽고 작은 기능 브랜치에서 변경한다. 공통 변경에는 관련 담당자의 검토를 요청한다.
 
 기존 구조에서 넘어오는 사람은 [migration](migration.md)을 추가로 읽는다. 과거 원본 연구·작업 로그·개인 측정 증거는 공개본에서 제외했다. 현재 팀 개발에 필요한 계약과 검증 해석은 위 문서에 정리했다.

@@ -1,3 +1,4 @@
+/* 한 회차 수집 결과를 유효성에 따라 CSV로 출력한다. 수집 간 대기와 중단은 여기서 담당한다. */
 #define WIN32_LEAN_AND_MEAN
 #include <windows.h>
 
@@ -180,6 +181,7 @@ int main(int argc, char **argv)
         if (count != 0 && iteration >= count) {
             break;
         }
+        /* 수집·출력 뒤에 기다리므로 실제 관측 간격은 이 대기값보다 길 수 있다. */
         if (WaitForSingleObject(stop_event, interval_ms) == WAIT_FAILED) {
             fprintf(stderr, "wait failed: %lu\n", GetLastError());
             exit_code = 1;

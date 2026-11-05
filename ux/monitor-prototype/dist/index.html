@@ -1,0 +1,50 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>PC Resource Monitor · 로컬 UX 시안</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <div class="review-bar" aria-label="시안 검토 도구">
+    <div class="review-title"><span class="review-dot"></span> LOCAL DESIGN STUDY <span class="example-label">예시 데이터</span></div>
+    <div class="review-controls">
+      <div class="direction-switch" role="group" aria-label="디자인 방향"><button data-view="a" aria-pressed="true">A <span>사용량 중심</span></button><button data-view="b" aria-pressed="false">B <span>비교 중심</span></button></div>
+      <label class="scenario-label">상태 <select id="scenario"><option value="mixed">혼합 예시</option><option value="first">첫 표본</option><option value="paused">일시정지</option><option value="collection-error">수집 오류</option><option value="storage-error">저장 오류</option></select></label>
+      <button class="scope-button" id="scope-open">구현 범위 ↗</button>
+    </div>
+  </div>
+  <div class="app-shell">
+    <aside class="rail" aria-label="앱 정보">
+      <a class="brand" href="#main" aria-label="PC Resource Monitor 본문"><span class="brand-mark"><i></i><i></i><i></i></span><span>PC RESOURCE<br><strong>MONITOR</strong></span></a>
+      <div class="rail-divider"></div>
+      <div class="rail-item active"><span aria-hidden="true">▦</span> 지금의 사용량</div>
+      <p class="rail-note">내 사용 패턴을 기준으로<br>지금의 변화를 살펴봅니다.</p>
+      <div class="rail-bottom"><span class="local-dot"></span> 로컬 UX 시안<p>합성 데이터 · 외부 연결 없음</p><span class="proposal">새 UI 제안</span></div>
+    </aside>
+    <main id="main">
+      <header class="page-header"><div><div class="eyebrow">MY COMPUTER / RESOURCE MONITOR</div><h1 id="page-title">지금, 무엇을 쓰고 있나요?</h1><p id="page-subtitle">프로그램의 최근 사용량과 개별 프로세스의 평소 기준을 함께 살펴보세요.</p></div><button id="pause" class="button pause-button">Ⅱ 표시 일시정지</button></header>
+      <section id="observation" class="observation" aria-label="관측 상태"></section>
+      <div id="scenario-banner" class="scenario-banner" hidden></div>
+      <div id="comparison-intro" hidden></div>
+      <section class="workspace" id="workspace">
+        <div class="list-pane">
+          <div class="section-heading"><div><span class="section-index">01</span><h2>현재 프로그램</h2><span id="process-count" class="count"></span></div><button id="group-edit" class="text-button">구성원 편집 <span>↗</span></button></div>
+          <div class="list-toolbar"><label class="search"><span aria-hidden="true">⌕</span><input id="search" type="search" placeholder="프로그램 또는 PID 검색" aria-label="프로그램 또는 PID 검색"><kbd>Ctrl F</kbd></label><label class="flat-switch"><input id="flat" type="checkbox"> 그룹 없이 보기</label></div>
+          <div class="table-container"><table id="resource-table"><colgroup><col class="name-col"><col class="cpu-col"><col class="memory-col"><col class="io-col"><col class="io-col"></colgroup><thead><tr><th scope="col"><button data-sort="name">프로그램 <span></span></button><small>CPU 비교 · 마지막 완료창</small></th><th scope="col"><button data-sort="cpu">CPU <span></span></button><small>%</small></th><th scope="col"><button data-sort="ram">메모리 <span></span></button><small>GB · Working Set</small></th><th scope="col"><button data-sort="read">읽기 <span></span></button><small>MB/s</small></th><th scope="col"><button data-sort="write">쓰기 <span></span></button><small>MB/s</small></th></tr></thead><tbody id="rows"></tbody></table></div>
+          <div id="empty" class="empty" hidden><span>⌕</span><h3>일치하는 프로그램이 없습니다</h3><p>다른 이름이나 PID로 검색해 보세요. 그룹 합계의 범위는 그대로 유지됩니다.</p><button class="button" id="clear-search">검색 지우기</button></div>
+          <div class="table-notes"><p><span class="note-symbol">i</span> 그룹은 현재 구성원의 합계입니다. 펼쳐서 개별 프로세스의 비교 근거를 확인하세요.</p><p>CPU: 전체 논리 CPU 대비 · 메모리: Working Set · <b>1 GB = 1,000,000,000 bytes</b><br>공유 페이지가 중복될 수 있으며, 그룹 합계는 PC 전체 사용률이나 고유 점유율이 아닙니다. 읽기/쓰기는 프로세스 I/O이며 디스크 사용률이 아닙니다. <span class="proposal inline">검색·정렬·메모리 GB는 UI 제안</span></p></div>
+        </div>
+        <aside class="detail-pane" id="detail" aria-label="선택한 대상 상세"></aside>
+      </section>
+      <footer class="page-footer"><span>PC RESOURCE MONITOR <b>—</b> LOCAL UX STUDY</span><span>고정된 합성 예시 · 2026.11.03 14:32:06 KST</span></footer>
+    </main>
+  </div>
+  <dialog id="scope-dialog" aria-labelledby="scope-title"><div class="dialog-top"><span class="eyebrow">ABOUT THIS STUDY</span><button class="icon-button" data-close aria-label="구현 범위 닫기">×</button></div><h2 id="scope-title">지금 보고 있는 화면의 범위</h2><p class="dialog-lead">기존 기능을 두 가지 정보 구조로 재배치한, 브라우저 전용 시안입니다.</p><div class="scope-row"><span class="scope-number">01</span><div><h3>기본 GUI에 있는 기능</h3><p>최근 수치, 개별 Baseline 근거, 그룹 부분합과 펼침, 그룹 없이 보기, 세션 구성원 지정·이동·공유 분리·자동 복원, 기간 제한 알림 억제, Pause/Resume.</p></div></div><div class="scope-row"><span class="scope-number">02</span><div><h3>이번에 제안하는 UI <span class="proposal">새 UI 제안</span></h3><p>한국어 정보 구조, 검색·수치 정렬, 별도 상세와 비교 카드, 메모리 GB, 결측 설명, 유효 개수와 관측 시점 강조. 디자인 A/B와 상태 선택은 시안 검토 도구입니다.</p></div></div><div class="scope-row"><span class="scope-number">03</span><div><h3>별도 변화 사건 프로토타입</h3><p>변화 사건 이력, 전체 비교창 조회, 고정 규칙 비교, 사용자 평가와 로컬 export/replay는 <code>gui/experiment_gui.c</code> 및 <code>docs/prototype-guide.md</code>의 별도 도구 범위입니다. 이 화면에 통합하지 않았습니다.</p></div></div><div class="dialog-footnote">실제 수집·DB 저장·프로세스 조작·외부 전송은 없습니다. 모든 조작은 현재 페이지의 예시 메모리 안에서만 작동합니다. 새로고침하면 초기화됩니다.</div><button class="button primary dialog-done" data-close>확인</button></dialog>
+  <dialog id="group-dialog" aria-labelledby="group-title"></dialog>
+  <div id="toast" class="toast" role="status" aria-live="polite"></div>
+  <script src="fixture.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>

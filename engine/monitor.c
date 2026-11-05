@@ -1,3 +1,5 @@
+/* 회차별 저장 트랜잭션과 인스턴스 관측창·Baseline을 조율한다.
+ * DB COMMIT 뒤에만 새 상태와 독립 snapshot을 공개한다. */
 #define WIN32_LEAN_AND_MEAN
 #include <windows.h>
 #include <stdio.h>
@@ -5,47 +7,47 @@
 #include <string.h>
 #include <math.h>
 #include <limits.h>
-#include "monitor_internal.h"
-#include "storage_internal.h"
+#include "monitor_engine_private.h"
+#include "monitor_source_store.h"
 
 #define TICKS MONITOR_TICKS_PER_SECOND
 #define DAY MONITOR_DAY_TICKS
 #include "baseline.h"
-static const unsigned metric_bits[4] = { RESOURCE_VALID_CPU, RESOURCE_VALID_MEMORY,
-    RESOURCE_VALID_IO_READ, RESOURCE_VALID_IO_WRITE };
-
 static char *copy_string(const char *s)
 {
     size_t n;
     char *p;
     if (!s) return NULL;
-    n = strlen(s) + 1; p = malloc(n);
+    n = strlen(s) + 1;
+    p = malloc(n);
     if (p) memcpy(p, s, n);
     return p;
 }
-static void unavailable(MonitorMetricReport *r, const char *reason)
-{
-    memset(r, 0, sizeof(*r)); r->state = MONITOR_UNAVAILABLE;
-    r->current = r->median = r->mad = r->threshold = NAN;
-    snprintf(r->reason, sizeof(r->reason), "%s", reason);
-}
+
 const char *monitor_state_name(MonitorState s)
 {
     static const char *const names[] = { "unavailable", "learning", "normal", "attention", "candidate" };
     return s >= MONITOR_UNAVAILABLE && s <= MONITOR_CANDIDATE ? names[s] : "unknown";
 }
+
 const char *monitor_metric_name(unsigned metric)
 {
     static const char *const names[] = { "CPU %", "Working set bytes", "Read B/s", "Write B/s" };
     return metric < 4 ? names[metric] : "unknown";
 }
+
 void monitor_snapshot_free(MonitorSnapshot *s)
 {
     size_t i;
     if (!s) return;
-    for (i = 0; i < s->count; ++i) { free(s->rows[i].name); free(s->rows[i].path); }
-    free(s->rows); free(s);
+    for (i = 0; i < s->count; ++i) {
+        free(s->rows[i].name);
+        free(s->rows[i].path);
+    }
+    free(s->rows);
+    free(s);
 }
+
 static void free_instances(MonitorInstance *p, size_t count)
 {
     size_t i;
@@ -53,97 +55,159 @@ static void free_instances(MonitorInstance *p, size_t count)
     for (i = 0; i < count; ++i) free(p[i].path);
     free(p);
 }
+
+
+/* 포화 시 발급을 중단하는 CAS 카운터. 이 프로세스에서 cookie를 재사용하지 않는다. */
+__declspec(align(8)) static volatile LONG64 engine_cookie_counter;
+static uint64_t new_engine_cookie(void)
+{
+    LONG64 previous;
+    for (;;) {
+        previous = InterlockedCompareExchange64(&engine_cookie_counter, 0, 0);
+        if (previous == LLONG_MAX) return 0;
+        if (InterlockedCompareExchange64(&engine_cookie_counter, previous + 1, previous) == previous)
+            return (uint64_t)(previous + 1);
+    }
+}
+static void invalidate_commit(MonitorEngine *e)
+{
+    e->committed_snapshot = NULL;
+    e->committed_rows = NULL;
+    memset(&e->committed_ref, 0, sizeof(e->committed_ref));
+    if (e->mutation_epoch == UINT64_MAX) e->refs_disabled = 1;
+    else ++e->mutation_epoch;
+}
+static int store_result(MonitorEngine *e, int ok)
+{
+    if (!ok) snprintf(e->error, sizeof(e->error), "%s", monitor_store_error(e->store));
+    return ok;
+}
+const char *monitor_error(const MonitorEngine *e) { return e ? e->error : "engine unavailable"; }
+int monitor_open(const char *path, int synthetic, MonitorEngine **out, char *error, size_t size)
+{
+    MonitorEngine *e;
+    if (out) *out = NULL;
+    if (error && size) error[0] = 0;
+    if (!out || !path || !path[0] || (synthetic != 0 && synthetic != 1)) return 0;
+    e = calloc(1, sizeof(*e));
+    if (!e) return 0;
+    e->synthetic = synthetic;
+    e->cookie = new_engine_cookie();
+    if (!e->cookie) {
+        if (error && size) snprintf(error, size, "Engine identifier exhausted");
+        free(e);
+        return 0;
+    }
+    if (!monitor_store_open(path, synthetic, &e->store, error, size)) { free(e); return 0; }
+    e->session = monitor_store_session(e->store);
+    *out = e;
+    return 1;
+}
+void monitor_close(MonitorEngine *e)
+{
+    if (!e) return;
+    monitor_reset(e);
+    monitor_store_close(e->store);
+    free(e);
+}
+int monitor_storage_stats(MonitorEngine *e, MonitorStorageStats *out)
+{
+    if (!e || !out) return 0;
+    return store_result(e, monitor_store_stats(e->store, out));
+}
+int monitor_record_failure(MonitorEngine *e, uint64_t utc, unsigned status)
+{
+    if (!e) return 0;
+    invalidate_commit(e);
+    if (utc > INT64_MAX) return 0;
+    monitor_reset(e);
+    return store_result(e, monitor_store_record_failure(e->store, utc, status));
+}
+int monitor_feedback(MonitorEngine *e, int64_t program, MonitorFeedback kind, uint64_t now)
+{
+    uint64_t duration = kind == MONITOR_FEEDBACK_IGNORE ? 3600 * TICKS : 86400 * TICKS;
+    if (!e) return 0;
+    invalidate_commit(e);
+    if (program <= 0 || kind < MONITOR_FEEDBACK_CANCEL || kind > MONITOR_FEEDBACK_EXPECTED || now > INT64_MAX - duration) return 0;
+    return store_result(e, monitor_store_feedback(e->store, program, kind, now));
+}
+
 void monitor_reset(MonitorEngine *e)
 {
     if (!e) return;
-    free_instances(e->instances, e->count); e->instances = NULL; e->count = 0;
+    invalidate_commit(e);
+    baseline_history_clear(&e->history);
+    free_instances(e->instances, e->count);
+    e->instances = NULL;
+    e->count = 0;
 }
+
 static void reset_window(MonitorInstance *p, uint64_t anchor, int reset_streak)
 {
     unsigned m;
-    p->start = p->last_utc = anchor; p->duration = 0;
-    memset(p->sum, 0, sizeof(p->sum)); memset(p->covered, 0, sizeof(p->covered));
-    memset(p->samples, 0, sizeof(p->samples));
+    monitor_window_reset(&p->window, anchor);
     if (reset_streak) {
         memset(p->streak, 0, sizeof(p->streak));
         for (m = 0; m < 4; ++m) {
-            unavailable(&p->report[m], "collecting complete 60-75s window");
+            monitor_window_unavailable(&p->report[m], "collecting complete 60-75s window");
             p->report[m].state = p->program_id ? MONITOR_LEARNING : MONITOR_UNAVAILABLE;
         }
     }
 }
-static int save_window(MonitorEngine *e, MonitorInstance *p, sqlite3_int64 run, sqlite3_int64 cutoff)
+static int prepare_window_metric_report(MonitorEngine *engine, MonitorInstance *instance,
+    unsigned metric)
 {
-    sqlite3_stmt *s = NULL;
-    sqlite3_int64 id;
-    unsigned m;
-    if (!monitor_db_prepare(e, "INSERT INTO aggregate_window(run_id,program_id,pid,creation,start_utc,end_utc,duration,version) VALUES(?,?,?,?,?,?,?,1)", &s)) return 0;
-    sqlite3_bind_int64(s, 1, run); sqlite3_bind_int64(s, 2, p->program_id);
-    sqlite3_bind_int64(s, 3, p->pid); sqlite3_bind_int64(s, 4, (sqlite3_int64)p->creation);
-    sqlite3_bind_int64(s, 5, (sqlite3_int64)p->start); sqlite3_bind_int64(s, 6, (sqlite3_int64)p->last_utc);
-    sqlite3_bind_double(s, 7, p->duration);
-    if (!monitor_db_done(e, s)) { sqlite3_finalize(s); return 0; }
-    sqlite3_finalize(s); s = NULL; id = sqlite3_last_insert_rowid(e->db);
-    if (!monitor_db_prepare(e, "INSERT INTO aggregate_metric VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)", &s)) return 0;
-    for (m = 0; m < 4; ++m) {
-        MonitorMetricReport *r = &p->report[m];
-        int quality = m == MONITOR_RAM ? p->samples[m] >= 15 :
-            p->covered[m] >= p->duration * 0.75 && p->covered[m] <= p->duration * 1.25;
-        unavailable(r, "insufficient metric coverage or valid sample count");
-        r->covered_seconds = p->covered[m]; r->valid_samples = p->samples[m]; r->window_end_utc_100ns = p->last_utc;
-        r->window_start_utc_100ns = p->start; r->window_duration_seconds = p->duration;
-        if (p->samples[m] && (m == MONITOR_RAM || p->covered[m] > 0))
-            r->current = p->sum[m] / (m == MONITOR_RAM ? p->samples[m] : p->covered[m]);
-        if (quality && isfinite(r->current)) {
-            if (!monitor_baseline(e, p, m, cutoff, r)) { sqlite3_finalize(s); return 0; }
-        } else p->streak[m] = 0;
-        sqlite3_bind_int64(s, 1, id); sqlite3_bind_int(s, 2, (int)m);
-        monitor_db_bind_value(s, 3, isfinite(r->current), r->current); sqlite3_bind_double(s, 4, r->covered_seconds);
-        sqlite3_bind_int(s, 5, (int)r->valid_samples); sqlite3_bind_int(s, 6, r->baseline_eligible);
-        sqlite3_bind_int(s, 7, r->state); sqlite3_bind_text(s, 8, r->reason, -1, SQLITE_TRANSIENT);
-        sqlite3_bind_int(s, 9, (int)r->count); sqlite3_bind_int(s, 10, (int)r->days); sqlite3_bind_int(s, 11, (int)r->minutes);
-        monitor_db_bind_value(s, 12, isfinite(r->median), r->median); monitor_db_bind_value(s, 13, isfinite(r->mad), r->mad);
-        monitor_db_bind_value(s, 14, isfinite(r->threshold), r->threshold); sqlite3_bind_int(s, 15, (int)r->streak);
-        if (!monitor_db_done(e, s)) { sqlite3_finalize(s); return 0; }
-    }
-    sqlite3_finalize(s); reset_window(p, p->last_utc, 0); return 1;
+    MonitorMetricReport *report = &instance->report[metric];
+    if (monitor_window_metric(&instance->window, metric, report)) {
+        BaselineInput input;
+        unsigned next_streak;
+        input.program_id = instance->program_id; input.exact_start = instance->window.start;
+        input.metric = metric; input.prior_streak = instance->streak[metric];
+        if (!monitor_baseline(&engine->history, &input, report, &next_streak)) return store_result(engine, 0);
+        instance->streak[metric] = next_streak;
+    } else instance->streak[metric] = 0;
+    return 1;
 }
-static int advance_window(MonitorEngine *e, MonitorInstance *p, const ResourceData *r,
-    sqlite3_int64 run, sqlite3_int64 cutoff, size_t *completed)
+static int save_window(MonitorEngine *e, MonitorInstance *p, int64_t run)
 {
-    double values[4], intervals[4];
+    MonitorWindowHeader header;
+    MonitorWindowWrite scope = {0};
     unsigned m;
-    int observation_ok = (r->valid_fields & RESOURCE_VALID_OBSERVATION_INTERVAL) &&
-        isfinite(r->observation_interval_seconds) && r->observation_interval_seconds > 0 && r->observation_interval_seconds <= 15;
-    if (!p->program_id || !(r->valid_fields & RESOURCE_VALID_IDENTITY)) {
-        reset_window(p, r->measured_at_utc_100ns, 1); return 1;
-    }
-    if (!p->start || !observation_ok || r->measured_at_utc_100ns <= p->last_utc ||
-        p->duration + r->observation_interval_seconds > 75) {
-        reset_window(p, r->measured_at_utc_100ns, 1); return 1;
-    }
-    values[0] = r->cpu_percent; values[1] = (double)r->working_set_bytes;
-    values[2] = r->io_read_bytes_per_second; values[3] = r->io_write_bytes_per_second;
-    intervals[0] = r->cpu_interval_seconds; intervals[1] = r->observation_interval_seconds;
-    intervals[2] = intervals[3] = r->io_interval_seconds;
-    p->duration += r->observation_interval_seconds; p->last_utc = r->measured_at_utc_100ns;
+    header.run_id = run; header.program_id = p->program_id; header.pid = p->pid;
+    header.creation = p->creation; header.start = p->window.start;
+    header.end = p->window.last_utc; header.duration = p->window.duration;
+    if (!store_result(e, monitor_store_begin_window(e->store, &header, &scope))) return 0;
+    /* 창 헤더 뒤 metric별 품질·과거 비교·저장을 마치고 임시 statement를 해제한다. */
     for (m = 0; m < 4; ++m) {
-        if ((r->valid_fields & metric_bits[m]) && isfinite(values[m]) && values[m] >= 0 &&
-            isfinite(intervals[m]) && intervals[m] > 0 && intervals[m] <= 15) {
-            p->sum[m] += values[m] * (m == MONITOR_RAM ? 1 : intervals[m]);
-            p->covered[m] += intervals[m]; ++p->samples[m];
-        } else {
-            p->streak[m] = 0; p->report[m].streak = 0;
-            p->report[m].state = MONITOR_UNAVAILABLE;
-            snprintf(p->report[m].reason, sizeof(p->report[m].reason), "latest metric missing; persistence reset");
+        if (!prepare_window_metric_report(e, p, m) ||
+            !store_result(e, monitor_store_write_metric(e->store, &scope, m, &p->report[m]))) {
+            monitor_store_end_window(&scope);
+            return 0;
         }
     }
-    if (p->duration >= 60) {
-        if (!save_window(e, p, run, cutoff)) return 0;
+    monitor_store_end_window(&scope);
+    reset_window(p, p->window.last_utc, 0);
+    return 1;
+}
+static int advance_window(MonitorEngine *e, MonitorInstance *p, const ResourceData *r,
+    int64_t run, size_t *completed)
+{
+    MonitorWindowStep step = monitor_window_observe(&p->window, r, p->program_id != 0);
+    unsigned m;
+    if (step.reset) { reset_window(p, r->measured_at_utc_100ns, 1); return 1; }
+    for (m = 0; m < 4; ++m) if (step.missing & (1u << m)) {
+        p->streak[m] = 0;
+        p->report[m].streak = 0;
+        p->report[m].state = MONITOR_UNAVAILABLE;
+        snprintf(p->report[m].reason, sizeof(p->report[m].reason), "latest metric missing; persistence reset");
+    }
+    if (step.complete) {
+        if (!save_window(e, p, run)) return 0;
         ++*completed;
     }
     return 1;
 }
+
 static int valid_input(const ResourceBatch *batch)
 {
     size_t i;
@@ -158,86 +222,187 @@ static int valid_input(const ResourceBatch *batch)
     }
     return 1;
 }
-int monitor_ingest(MonitorEngine *e, const ResourceBatch *batch, const char *const *paths, MonitorSnapshot **out)
+
+typedef enum InstancePrepareResult {
+    INSTANCE_PREPARE_DATABASE_FAILED = 0,
+    INSTANCE_PREPARE_OK = 1,
+    INSTANCE_PREPARE_MEMORY_FAILED = -1
+} InstancePrepareResult;
+
+/* 다음 상태 배열이 복사된 경로를 소유하며 현재 engine 배열은 변경하지 않는다. */
+static InstancePrepareResult prepare_instance(MonitorEngine *engine, MonitorInstance *instance,
+    const ResourceData *raw, const char *const *paths, size_t index)
+{
+    size_t previous_index;
+    unsigned metric;
+    instance->pid = raw->pid;
+    instance->creation = raw->creation_time_utc_100ns;
+    if (raw->valid_fields & RESOURCE_VALID_IDENTITY) {
+        for (previous_index = 0; previous_index < engine->count; ++previous_index) {
+            if (engine->instances[previous_index].pid == raw->pid &&
+                engine->instances[previous_index].creation == raw->creation_time_utc_100ns) {
+                break;
+            }
+        }
+        if (previous_index < engine->count) {
+            *instance = engine->instances[previous_index];
+            instance->path = copy_string(engine->instances[previous_index].path);
+            if (engine->instances[previous_index].path && !instance->path) return INSTANCE_PREPARE_MEMORY_FAILED;
+        }
+        if (!instance->path) {
+            instance->path = paths ? copy_string(paths[index]) :
+                monitor_query_path(raw->pid, raw->creation_time_utc_100ns, &instance->path_error);
+            if (paths && paths[index] && !instance->path) return INSTANCE_PREPARE_MEMORY_FAILED;
+            if (instance->path) {
+                instance->path_error = 0;
+                instance->program_id = monitor_store_program_id(engine->store, instance->path,
+                    raw->process_name_utf8, raw->measured_at_utc_100ns);
+                if (!instance->program_id) { store_result(engine, 0); return INSTANCE_PREPARE_DATABASE_FAILED; }
+            } else if (paths) instance->path_error = ERROR_ACCESS_DENIED;
+        }
+    } else instance->path_error = ERROR_INVALID_DATA;
+    if (!instance->window.start) {
+        for (metric = 0; metric < 4; ++metric) {
+            monitor_window_unavailable(&instance->report[metric], "identity/path unavailable");
+        }
+    }
+    return INSTANCE_PREPARE_OK;
+}
+
+/* snapshot이 문자열 사본을 소유하며 배치·인스턴스의 저장 공간을 빌리지 않는다. */
+static int clone_snapshot_row(MonitorRow *row, const ResourceData *raw,
+    const MonitorInstance *instance)
+{
+    row->raw = *raw;
+    row->name = copy_string(raw->process_name_utf8 ? raw->process_name_utf8 : "(unavailable)");
+    row->path = copy_string(instance->path);
+    row->raw.process_name_utf8 = row->name;
+    if (!row->name || (instance->path && !row->path)) return 0;
+    row->program_id = instance->program_id;
+    row->path_error = instance->path_error;
+    memcpy(row->metric, instance->report, sizeof(row->metric));
+    return 1;
+}
+
+int monitor_ingest_with_commit_ref(MonitorEngine *e, const ResourceBatch *batch, const char *const *paths, MonitorSnapshot **out, MonitorCommitRef *ref)
 {
     MonitorSnapshot *snapshot = NULL;
     MonitorInstance *next = NULL;
-    sqlite3_stmt *s = NULL;
-    sqlite3_int64 run, cutoff;
-    size_t i, j;
+    int64_t run, cutoff;
+    size_t i;
     LARGE_INTEGER begin, end, frequency;
-    int ok;
     if (out) *out = NULL;
+    if (ref) memset(ref, 0, sizeof(*ref));
+    if (e) invalidate_commit(e);
     if (!e || !out) return 0;
     if (!valid_input(batch) || (paths && !e->synthetic)) {
-        snprintf(e->error, sizeof(e->error), "Invalid batch or real DB fixture injection"); monitor_reset(e); return 0;
+        snprintf(e->error, sizeof(e->error), "Invalid batch or real DB fixture injection");
+        monitor_reset(e);
+        return 0;
     }
     e->error[0] = 0;
-    QueryPerformanceCounter(&begin); QueryPerformanceFrequency(&frequency);
+    QueryPerformanceCounter(&begin);
+    QueryPerformanceFrequency(&frequency);
+    /* 대기 상태를 분리해 두고 COMMIT 성공 뒤에만 engine·호출자에게 넘긴다. */
     snapshot = calloc(1, sizeof(*snapshot));
     next = calloc(batch->count ? batch->count : 1, sizeof(*next));
     if (!snapshot || !next) goto memory_failed;
     snapshot->rows = calloc(batch->count ? batch->count : 1, sizeof(*snapshot->rows));
     if (!snapshot->rows) goto memory_failed;
-    snapshot->count = batch->count; snapshot->synthetic = e->synthetic;
+    snapshot->count = batch->count;
+    snapshot->synthetic = e->synthetic;
     snapshot->measured_utc_100ns = batch->finished_at_utc_100ns;
     snapshot->foreground_observed_utc_100ns = batch->foreground_observed_at_utc_100ns;
     snapshot->foreground_pid = batch->foreground_pid;
-    if (!monitor_db_execute(e, "BEGIN IMMEDIATE")) goto failed;
-    cutoff = monitor_db_scalar(e, "SELECT COALESCE(max(id),0) FROM aggregate_window", &ok); if (!ok) goto failed;
-    if (!monitor_db_prepare(e, "INSERT INTO collection_run(session_id,started,finished,status,row_count,cpu_count,foreground_utc,foreground_pid) VALUES(?,?,?,0,?,?,?,?)", &s)) goto failed;
-    sqlite3_bind_int64(s, 1, e->session); sqlite3_bind_int64(s, 2, (sqlite3_int64)batch->started_at_utc_100ns);
-    sqlite3_bind_int64(s, 3, (sqlite3_int64)batch->finished_at_utc_100ns);
-    sqlite3_bind_int64(s, 4, (sqlite3_int64)batch->count); sqlite3_bind_int64(s, 5, batch->logical_processor_count);
-    sqlite3_bind_int64(s, 6, (sqlite3_int64)batch->foreground_observed_at_utc_100ns);
-    if (batch->foreground_pid) sqlite3_bind_int64(s, 7, batch->foreground_pid);
-    if (!monitor_db_done(e, s)) goto failed;
-    sqlite3_finalize(s); s = NULL; run = sqlite3_last_insert_rowid(e->db);
+    /* 이 회차의 창을 넣기 전에 과거 이력의 ID 상한을 고정한다. */
+    if (!store_result(e, monitor_store_begin(e->store, &cutoff))) goto failed;
+    baseline_history_begin(&e->history, e->store, cutoff);
+    if (!store_result(e, monitor_store_insert_run(e->store, batch, &run))) goto failed;
+
     for (i = 0; i < batch->count; ++i) {
         const ResourceData *r = &batch->items[i];
         MonitorInstance *p = &next[i];
         MonitorRow *row = &snapshot->rows[i];
-        unsigned m;
-        p->pid = r->pid; p->creation = r->creation_time_utc_100ns;
-        if (r->valid_fields & RESOURCE_VALID_IDENTITY) {
-            for (j = 0; j < e->count; ++j) if (e->instances[j].pid == r->pid && e->instances[j].creation == r->creation_time_utc_100ns) break;
-            if (j < e->count) {
-                *p = e->instances[j]; p->path = copy_string(e->instances[j].path);
-                if (e->instances[j].path && !p->path) goto memory_failed;
-            }
-            if (!p->path) {
-                p->path = paths ? copy_string(paths[i]) : monitor_query_path(r->pid, r->creation_time_utc_100ns, &p->path_error);
-                if (paths && paths[i] && !p->path) goto memory_failed;
-                if (p->path) {
-                    p->path_error = 0; p->program_id = monitor_db_program_id(e, p->path, r->process_name_utf8, r->measured_at_utc_100ns);
-                    if (!p->program_id) goto failed;
-                } else if (paths) p->path_error = ERROR_ACCESS_DENIED;
-            }
-        } else p->path_error = ERROR_INVALID_DATA;
-        if (!p->start) for (m = 0; m < 4; ++m) unavailable(&p->report[m], "identity/path unavailable");
-        if (!monitor_db_save_raw(e, run, r, p) || !advance_window(e, p, r, run, cutoff, &snapshot->completed_windows)) goto failed;
-        row->raw = *r; row->name = copy_string(r->process_name_utf8 ? r->process_name_utf8 : "(unavailable)");
-        row->path = copy_string(p->path); row->raw.process_name_utf8 = row->name;
-        if (!row->name || (p->path && !row->path)) goto memory_failed;
-        row->program_id = p->program_id; row->path_error = p->path_error;
-        memcpy(row->metric, p->report, sizeof(row->metric));
-        if (!monitor_db_get_feedback(e, row, batch->finished_at_utc_100ns)) goto failed;
+        InstancePrepareResult prepared = prepare_instance(e, p, r, paths, i);
+        if (prepared == INSTANCE_PREPARE_MEMORY_FAILED) goto memory_failed;
+        if (prepared == INSTANCE_PREPARE_DATABASE_FAILED) goto failed;
+        if (!store_result(e, monitor_store_write_raw(e->store, run, r, p->program_id, p->path_error)) ||
+            !advance_window(e, p, r, run, &snapshot->completed_windows)) goto failed;
+        if (!clone_snapshot_row(row, r, p)) goto memory_failed;
+        if (!store_result(e, monitor_store_read_feedback(e->store, row->program_id, batch->finished_at_utc_100ns, &row->feedback, &row->feedback_expires_utc_100ns))) goto failed;
     }
-    if (!monitor_db_prepare(e, "UPDATE program SET last_seen=max(last_seen,?) WHERE id IN(SELECT program_id FROM raw WHERE run_id=? AND program_id IS NOT NULL)", &s)) goto failed;
-    sqlite3_bind_int64(s, 1, (sqlite3_int64)batch->finished_at_utc_100ns); sqlite3_bind_int64(s, 2, run);
-    if (!monitor_db_done(e, s)) goto failed;
-    sqlite3_finalize(s); s = NULL;
-    if (!monitor_db_trim(e, batch->finished_at_utc_100ns) || !monitor_db_execute(e, "COMMIT")) goto failed;
-    free_instances(e->instances, e->count); e->instances = next; e->count = batch->count; next = NULL;
+    /* 보관 정리가 cutoff 이하 행도 삭제할 수 있으므로 캐시 선택 결과를
+     * trim이나 다음 트랜잭션까지 유지하지 않는다. */
+    baseline_history_clear(&e->history);
+    if (!store_result(e, monitor_store_touch_run_programs(e->store, run, batch->finished_at_utc_100ns)) ||
+        !store_result(e, monitor_store_trim(e->store, batch->finished_at_utc_100ns)) ||
+        !store_result(e, monitor_store_commit(e->store))) goto failed;
+
+    /* 트랜잭션이 성공했으므로 새 인스턴스 배열의 소유권을 한 번만 넘긴다. */
+    free_instances(e->instances, e->count);
+    e->instances = next;
+    e->count = batch->count;
+    next = NULL;
     snapshot->sequence = (uint64_t)++e->sequence;
-    QueryPerformanceCounter(&end); snapshot->store_ms = (double)(end.QuadPart - begin.QuadPart) * 1000 / (double)frequency.QuadPart;
+    if (ref && !e->refs_disabled) {
+        ref->engine_cookie = e->cookie; ref->mutation_epoch = e->mutation_epoch;
+        ref->sequence = snapshot->sequence; ref->session_id = e->session;
+        ref->run_id = run; ref->history_cutoff = cutoff;
+        e->committed_ref = *ref;
+        e->committed_snapshot = snapshot; e->committed_rows = snapshot->rows;
+        e->committed_count = snapshot->count; e->committed_windows = snapshot->completed_windows;
+        e->committed_utc = snapshot->measured_utc_100ns;
+        e->committed_foreground_utc = snapshot->foreground_observed_utc_100ns;
+        e->committed_foreground_pid = snapshot->foreground_pid;
+    }
+    QueryPerformanceCounter(&end);
+    snapshot->store_ms = (double)(end.QuadPart - begin.QuadPart) * 1000 / (double)frequency.QuadPart;
     snprintf(snapshot->status, sizeof(snapshot->status), "%srecorded %zu rows; %zu completed windows; local DB; raw 1h / summary 28d",
         e->synthetic ? "SYNTHETIC - " : "", snapshot->count, snapshot->completed_windows);
-    *out = snapshot; return 1;
+    *out = snapshot;
+    return 1;
 memory_failed:
     snprintf(e->error, sizeof(e->error), "Out of memory; window/streak state discarded");
 failed:
-    sqlite3_finalize(s);
-    sqlite3_exec(e->db, "ROLLBACK", NULL, NULL, NULL);
-    free_instances(next, batch->count); monitor_snapshot_free(snapshot); monitor_reset(e); return 0;
+    /* 미완료 DB 작업과 아직 공개하지 않은 메모리를 함께 버린다. */
+    baseline_history_clear(&e->history);
+    monitor_store_rollback(e->store);
+    free_instances(next, batch->count);
+    monitor_snapshot_free(snapshot);
+    monitor_reset(e);
+    return 0;
+}
+
+int monitor_ingest(MonitorEngine *e, const ResourceBatch *batch, const char *const *paths, MonitorSnapshot **out)
+{ return monitor_ingest_with_commit_ref(e, batch, paths, out, NULL); }
+int64_t monitor_source_session(const MonitorEngine *e) { return e ? e->session : 0; }
+int monitor_source_create_pair(MonitorEngine *e, const char *pair)
+{
+    if (!e) return 0;
+    invalidate_commit(e);
+    if (!pair) { snprintf(e->error, sizeof(e->error), "Source pair unavailable"); return 0; }
+    return store_result(e, monitor_store_source_create_pair(e->store, pair));
+}
+int monitor_source_read_committed(MonitorEngine *e, const MonitorCommitRef *ref,
+    const MonitorSnapshot *snapshot, MonitorCommittedWindows *out)
+{
+    const MonitorCommitRef *expected;
+    if (out) memset(out, 0, sizeof(*out));
+    if (!e || !out) return 0;
+    expected = &e->committed_ref;
+    if (!ref || !snapshot || e->refs_disabled || !ref->engine_cookie ||
+        ref->engine_cookie != e->cookie || ref->mutation_epoch != e->mutation_epoch ||
+        ref->engine_cookie != expected->engine_cookie || ref->mutation_epoch != expected->mutation_epoch ||
+        ref->sequence != expected->sequence || ref->session_id != expected->session_id ||
+        ref->run_id != expected->run_id || ref->history_cutoff != expected->history_cutoff ||
+        snapshot != e->committed_snapshot || snapshot->rows != e->committed_rows ||
+        snapshot->sequence != ref->sequence || snapshot->count != e->committed_count ||
+        snapshot->completed_windows != e->committed_windows || snapshot->synthetic != e->synthetic ||
+        snapshot->measured_utc_100ns != e->committed_utc ||
+        snapshot->foreground_observed_utc_100ns != e->committed_foreground_utc ||
+        snapshot->foreground_pid != e->committed_foreground_pid) {
+        snprintf(e->error, sizeof(e->error), "Committed source reference is stale or snapshot does not match");
+        return 0;
+    }
+    return store_result(e, monitor_store_source_read(e->store, ref, snapshot, out));
 }

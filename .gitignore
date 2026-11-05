@@ -1,8 +1,9 @@
-# Build products and local observations (source/build scripts stay tracked).
+# 임시 빌드 출력·실사용 관측 자료·자격증명은 로컬에만 보존한다.
 /build/
 /build-*/
 /.local-private/
 *.exe
+*.dll
 *.lib
 *.obj
 *.pdb
@@ -31,14 +32,77 @@ __pycache__/
 *.pfx
 *.p12
 
-# Local work history/research contains machine-specific evidence. Public,
-# current contracts and validation summaries are maintained separately.
+# 합성 fixture C/H·Win64 ABI txt·SQLite·실행 schema 헤더·UX dist는 포함한다.
+# 실제 입력이 필요하면 내용 검토 뒤 이 규칙에 구체적 예외를 추가한다.
+
+# 기존 로컬 운영 지침과 원시 이력. 공개 요약은 docs/validation.md 등에 둔다.
 /AGENTS.md
 /WORK_LOG.md
-/docs/evidence/
+/third_party/sqlite/sqlite3ext.h
+
+# 과거 감사·연구·성능 원시 보존본은 제출 대상이 아니다.
+/docs/access-coverage-elevated-review.md
+/docs/access-coverage-followup.md
+/docs/access-coverage-review.md
+/docs/access-coverage.md
 /docs/analysis.md
+/docs/audit/
+/docs/evidence/
 /docs/implementation.md
-/docs/review.md
+/docs/native-ui-review.md
+/docs/native-ui-validation.md
+/docs/performance/
+/docs/phase1-2026-11-04.md
+/docs/phase1-independent-review.md
+/docs/phase2-2026-11-04.md
+/docs/phase2-independent-review.md
+/docs/process-grouping-analysis.md
+/docs/process-grouping-review.md
+/docs/process-grouping-validation.md
+/docs/prototype-review.md
+/docs/prototype-validation.md
+/docs/refactoring-2026-11-04-handoff.md
+/docs/refactoring-2026-11-04-review.md
+/docs/refactoring-2026-11-04.md
+/docs/research/
 /docs/research-data.md
 /docs/research-ui.md
-/third_party/sqlite/sqlite3ext.h
+/docs/review.md
+/docs/structural-review-2026-11-04/
+
+# 현재 프로필이 소비하지 않는 과거 전용/개인 환경 시험 도구. 로컬 파일 유지.
+/tests/access-coverage/cost_abba.py
+/tests/access-coverage/elevated_verify.py
+/tests/access-coverage/prepare-probes.py
+/tests/access-coverage/run-before-admin.ps1
+/tests/admin-gui/prepare.py
+/tests/performance/native-gui/build-probe.cmd
+/tests/performance/native-gui/native_perf.h
+/tests/performance/native-gui/prepare-cache-probe.ps1
+/tests/performance/native-gui/prepare-probe.ps1
+/tests/phase1-review/build.cmd
+/tests/phase1-review/test_gui_error_frame.c
+/tests/phase2-review/audit_stage_a.py
+/tests/phase2-review/audit_stage_b.py
+/tests/phase2-review/audit_stage_c.py
+/tests/phase2-review/check_prototype_extract.py
+/tests/refactor-review/audit_sources.py
+/tests/review-access-coverage/build-render-bench.cmd
+/tests/review-access-coverage/prepare.py
+/tests/review-access-coverage/render_bench.c
+/tests/review-grouping/preserved-after.json
+/tests/review-grouping/preserved-before.json
+/tests/review-grouping/source-before.json
+/tests/review-grouping/source-final-before-shell-boundary.json
+/tests/review-grouping/source-final.json
+/tests/review-gui-performance/build-regressions.cmd
+/tests/review-monitor/build-mature-probe.cmd
+/tests/review-monitor/inspect_sql.py
+/tests/review-monitor/test_mature_probe.c
+
+# 고정 합성 시안만 공개하고 과거 캡처·검증 manifest·인계는 보존한다.
+/ux/monitor-prototype/DESIGN.md
+/ux/monitor-prototype/HANDOFF.md
+/ux/monitor-prototype/NATIVE-PLAN.md
+/ux/monitor-prototype/VALIDATION.md
+/ux/monitor-prototype/verification/

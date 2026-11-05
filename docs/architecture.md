@@ -1,23 +1,30 @@
 # 아키텍처와 공통 계약
 
+2026-11-04의 2차 구조 개선은 기존 구현의 처리 순서를 유지하면서 상태와 저장 책임을 구분한다. `monitor_ingest`는 트랜잭션·실패 복구·commit 후 소유권 이전을, `prepare_instance`와 `clone_snapshot_row`는 각각 신원 연결과 독립 복사를 맡는다. 완료창 header와 metric statement를 준비한 뒤 metric별 품질 계산 → Baseline → 저장 순서를 유지한다. prototype은 core 선commit 뒤 별도 sidecar commit이라는 기존 경계를 유지한다. 기존 검증과 제출본 확인은 [검증 요약](validation.md)에 구분한다.
+
 ## 책임과 의존 관계
 
 | 영역 | 구현 | 의존·검토 경계 |
 |---|---|---|
 | collector | Windows adapter, 순수 계산 core, 생성시각 재검증 path adapter | 공개 ResourceBatch. SQLite·GUI에 의존하지 않는다. |
-| storage | DB open/close, schema, prepared SQL, raw/program, retention, feedback, stats | 공개 monitor.h와 내부 engine 상태를 사용. prepared Baseline 조회는 detection과 공동 계약. |
-| detection | Baseline 표본 수신, median/MAD·상한, 준비 gate·지속성 | engine의 현재 창·cutoff와 storage의 prepared query를 소비. 공개 API를 추가하지 않는다. |
-| engine | 수집 batch 검증, 트랜잭션, 인스턴스 연결, 관측창, snapshot | collector의 신원 어댑터와 storage helper, detection을 호출. |
-| gui | worker loop, UI, snapshot 교환, feedback command | monitor.h/resource_collector.h만 사용. SQLite connection을 직접 공유하지 않는다. |
-| app | 콘솔 수집 실행 | resource_collector.h만 사용. |
+| storage | DB open/close, schema, prepared SQL, raw/program/window, retention, feedback, stats | opaque `MonitorStore`가 DB·statement를 소유. instance 전체 대신 필요한 저장값을 받는다. |
+| history/cache | 날짜별 SQL reader, 회차 내 성공 결과 재사용 | `monitor_history.c`는 store의 prepared query를 관리하고 `baseline_history.c`는 store/cutoff/version 범위의 cache를 소유한다. |
+| detection | Baseline 표본 수신, median/MAD·상한, 준비 gate·지속성 | program/metric/exact start/prior streak와 history scope를 받고 report/next streak을 반환. SQLite·engine layout을 보지 않는다. |
+| engine | 수집 batch 검증, 트랜잭션, 인스턴스 연결, 실패 복구, snapshot | opaque store와 detection을 순서대로 호출. 인스턴스·완료창 공개는 COMMIT 뒤에만 한다. |
+| window | 누적·품질·reset | `monitor_window.[ch]`의 값 accumulator. DB·engine 구조체·문자열 소유가 없다. |
+| source | committed window 조회, pairing, readonly raw 진단 | engine이 ref/snapshot을 검증하고 storage가 같은session/run을 읽는다. caller소유 view배열은 snapshot을 빌린다. |
+| prototype | capture, store, reducer, history/export, replay, retention | coordinator가 core·sidecar transaction과 Track 수명을 조율하고 각 책임은 별도 TU다. 기존 공개 lifecycle과 source facade를 사용하고 core 내부 DB는 보지 않는다. retention은 공유 context 없이 DB·UTC·오류버퍼만 빌린다. |
+| grouping | OS 부모 관측, 관계 후보, 사용자 세션 소속, 현재 자원 합계 | 기존 MonitorSnapshot을 읽는 별도 모듈. DB·Baseline과 독립이며 원본 행을 수정하지 않는다. |
+| gui | worker loop, UI, snapshot 교환, 프로그램 그룹과 feedback command | monitor/resource collector와 grouping의 독립 결과를 사용. SQLite connection을 직접 공유하지 않는다. |
+| app | 수집 콘솔과 변화 사건 CLI | 콘솔은 resource_collector.h, 사건 CLI는 experiment.h의 lifecycle·조회 계약을 사용한다. |
 
-`monitor.lib`가 필요한 모듈과 SQLite를 함께 정적으로 묶는다. UI와 headless 모두 같은 worker와 engine을 사용한다. 공개 헤더는 include/, 내부 연결은 engine/monitor_internal.h, storage/storage_internal.h, detection/baseline.h에 둔다. 서로의 공개 자료형을 복제하지 않는다.
+`monitor.lib`가 필요한 모듈과 SQLite를 함께 정적으로 묶는다. UI와 headless 모두 같은 worker와 engine을 사용한다. 공개 자료형은 `include/monitor_types.h`에 있고 기존 `monitor.h`가 재노출하므로 include·layout·enum 호환을 유지한다. engine 상태는 `monitor_engine_private.h`, store 상태는 `monitor_store_private.h`, 값 계약은 `monitor_store.h`에 둔다. prototype은 `monitor_source.h`를 사용하고 core private을 포함하지 않는다. 임시 `monitor_internal.h`·`monitor_store_bridge.h`는 삭제했다. engine private의 제품 소비자는 engine뿐이며 테스트의 예외 접근은 `tests/support/monitor_fixture.c`로 모았다.
 
-## monitor.c 분리 결정
+## engine과 저장의 분리
 
-기존 34개 함수를 기능별로 이동했다. storage는 DB lifecycle·SQL helper·원시 저장·보관·피드백을, detection은 통계·Baseline 판정을 담당한다. engine은 transaction·save_window·advance_window·ingest와 snapshot을 유지한다. 함수 본문은 내부 helper 이름과 static 연결 범위 외에는 바꾸지 않았다. 공유 MonitorInstance 구조체만 내부 헤더로 이동했다.
+기존1차 정리는 함수별 책임을 구분했지만 공유 `MonitorInstance`와 engine DB 접근이 남았다. 2차 B에서는 storage가 `MonitorInstance`를 받지 않고 `MonitorWindowHeader`, `ResourceData`와 program/path-error 값, metric report를 받는다. store 객체의 open-time 할당1개가 추가되며 행별 할당은 추가하지 않는다. store 오류는 engine이 실패 시 복사하고 rollback/close가 최초 오류를 덮지 않는다.
 
-완료창 저장은 현재 창의 품질 계산, Baseline 비교, SQL insert, 창 reset의 순서와 rollback에 강하게 결합되어 engine에 남겼다. 이를 폴더에 맞춰 별도 wrapper로 쪼개지 않았다. `save_window`의 SQL/품질 변경은 storage·detection 공동 검토, 관측 순서 변경은 collector·GUI까지 영향 평가한다. 저장 backend와 통계 모듈은 각각 별도 번역 단위로 빌드된다.
+engine의 `save_window`는 순서를 조율하고 SQL은 store가 수행한다. `MonitorWindowWrite`는 heap 없는 scoped metric statement이며 성공·실패 모두 store의 end 함수로 해제한다. 관측창 accumulator는 instance에 값으로 들어가고 engine이 반환된 reset/missing/completion 신호에 따라 streak/report를 갱신한다. 저장 순서와 회차 실패 복구는 계속 함께 검증하지만 품질 계산을 이해할 때 DB layout을 알 필요는 없다.
 
 ## 실행·소유권·실패 흐름
 
@@ -25,11 +32,31 @@ worker가 collect 한 회차를 받아 engine에 동기 전달한다. engine은 
 
 ResourceBatch/문자열은 batch 소유, MonitorSnapshot/문자열은 반환 후 호출자 소유다. snapshot은 batch·engine·DB cursor를 참조하지 않는다. GUI는 잠금 아래 snapshot/복사된 feedback command만 교환한다. connection과 statements는 worker만 사용한다. 종료 후 batch_free/snapshot_free/monitor_close/collector_destroy로 각 소유권을 정리한다.
 
+선택적 `ResourceDisplayBatch`는 같은 수집 회차의 목록 이름·출처·호출 진단을 별도 소유하며 GUI envelope로만 이동한다. engine/storage/Baseline/group membership 입력에는 넣지 않는다. GUI는 count/index/PID/생성시각/측정시각을 대조하고 envelope와 함께 해제한다. 목록 이름은 현재 관측의 참고 표시이며 기존 `ResourceData` 이름 유효 비트와 신원·경로 계약은 유지한다. 자세한 변경과 권한별 실측은 [수집 계약](contracts/collector.md)에 있다.
+
 collector의 실제 QPC 구간과 기록용 UTC는 구분한다. CPU는 전체 논리 CPU 대비, RAM은 working set bytes, I/O는 process B/s다. PID+생성시각, 필드 validity, 결측 0 금지, 첫 표본·실패·역행·긴 공백 무효화는 [collector 계약](contracts/collector.md)을 따른다.
 
 Baseline은 현재 표본을 넣기 전에 비교한다. strict-past 정밀 start와 회차 cutoff를 모두 사용하고 날짜별 최대 64개의 서로 다른 종료 분 대표를 선택한다. [저장](contracts/storage.md)과 [판정](contracts/detection.md) 계약을 함께 적용한다. DB schema/app ID, 공개 헤더, 관측창·통계 상수는 이번 이동에서 유지했다.
 
+2026-11-03 성능 개선에서는 같은 ingest transaction 안에서 성공한 날짜별 선택값만 제한적으로 재사용한다. 키는 program ID·metric·UTC 날짜 하한·`min(day_end, exact_start)`이며 DB/cutoff/선택 버전과 회차 수명에 묶인다. 현재값·품질·streak·판정은 인스턴스별로 계산한다. 캐시는 최대 약2.16MiB의 선택적 할당이고, 할당 실패·포화 시 원래 SQL을 사용한다. row loop가 끝나면 retention 전에 해제하며 실패/reset/close에서도 폐기한다. 다음 회차나 다른 정밀 비교 상한의 결과를 무조건 공유하지 않는다.
+
+같은 변경에서 SQL이 이미 보장하는 종료 분 유일성을 이용해 C의 중복 분 재검색을 제거했다. 원래 선택 SQL·통계·학습 정책·공개 API·저장 형식은 유지했다. 측정 결과와 동등성/실패 검증 및 남은 고유 경로 비용은 [검증 요약](validation.md)에 있다.
+
 ## 선택적 확장 경계
+
+### Prototype 보관의 첫 독립 컴파일 단위
+
+2026-11-04 1차 구조 개선은 `prototype/experiment_retention.c/.h`만 추출했다. `experiment.c`의 기존 sidecar transaction에서 빌린 SQLite connection·UTC·오류 버퍼를 전달하며, retention은 자기 statement만 생성·해제한다. Experiment/Track/core 구조체나 공유 private context를 받지 않고 commit/rollback/connection close는 호출자 책임이다. header+retention object+SQLite만으로 보관 참조·실패·소유권을 시험할 수 있다.
+
+당시 1차는 capture/reducer/history/replay 전체와 core 저장 경계의 분리까지 포함하지 않았다. 이번2차에서는 위 책임표처럼 이를 별도 TU와 typed source 계약으로 옮겼으며 retention의 독립 계약은 그대로 유지했다. schema·replay 근거 의미와 제한된 prototype private context의 결합은 남는다. normal/injected/benchmark는 같은 TU 목록을 사용한다. 1차 결함 수정-only와 최초 추출의 증거는 [검증 요약](validation.md), 현재 경계·잔여 상태 소유권은 [source 계약](contracts/source.md)를 따른다.
+
+### 프로그램 그룹과 현재 합계
+
+2026-11-03 프로그램 그룹은 가상 합계 행과 펼친 개별 프로세스 행을 제공한다. 자동 실행 계통은 앱 소속의 확정이 아닌 추정 후보이며, 사용자 세션 지정과 공유·미할당 분리를 별도로 지원한다. 각 현재 행은 합계 한 곳에만 포함한다. 필드별 결측은 부분합/X/Y 또는 NA로 남기고 Working Set 합의 공유 page 중복과 CPU/I/O 관측구간 차이를 설명한다. 그룹 Baseline이나 그룹 피드백은 추가하지 않는다.
+
+수집·저장 ABI 및 기존 DB는 그대로다. worker의 자원 snapshot과 관계 결과는 같은 불변 묶음으로 전달하며 사용자 지정은 UI에서 최신 tuple에 대조한다. Pause 표시보존, Resume/restart 새 그룹 세션, 부모 부재·조회 실패·PID 재사용을 구분한다. 정확한 소속·합계·경계·소유권은 [그룹 계약](contracts/process-grouping.md), 실행 근거는 [검증 요약](validation.md)을 따른다.
+
+### 향후 외부 분석
 
 자원 이상, 역할 근거, 별도 보안 분석, AI 설명은 각각 별도 결과다. 단일 안전/불필요 판정으로 합치지 않는다. 외부 탐지기의 원래 label·검사 범위·버전을 보존하며 no finding은 전체 안전 보장이 아니다. 사용자 자원 피드백은 보안 결과나 측정 사실을 덮어쓰지 않는다.
 
