@@ -2,7 +2,7 @@
 
 Windows C 자원 수집기, SQLite 로컬 이력, 개인화 Baseline 비교와 Win32 GUI를 연결한 팀 프로젝트다. 현재 사용량과 평소 패턴의 차이를 근거와 함께 보여 준다. 자원 사용만으로 악성·불필요 여부를 판정하거나 프로세스를 자동 종료하지 않는다.
 
-이번 중간 제출은 `codex/change-event-prototype` 브랜치다. [원본 저장소](https://github.com/HighKcal/PC-Resource-Monitor)의 `main`으로 자동 병합하지 않는다. 후속 기여는 [Fork·PR 안내](CONTRIBUTING.md)를 따른다.
+중간 제출본은 [원본 저장소](https://github.com/HighKcal/PC-Resource-Monitor)의 `main` 브랜치를 기준으로 받는다. 후속 변경은 작업 브랜치에서 개발하고 PR로 `main`에 통합한다. 자세한 절차는 [Fork·PR 안내](CONTRIBUTING.md)를 따른다.
 
 ## 현재 구현 범위
 
@@ -22,7 +22,7 @@ Windows x64, Visual Studio 또는 Build Tools의 **Desktop development with C++*
 PowerShell에서 다음과 같이 받는다. 이미 checkout했다면 저장소 루트에서 빌드부터 실행한다.
 
 ```powershell
-git clone --branch codex/change-event-prototype https://github.com/HighKcal/PC-Resource-Monitor.git
+git clone --branch main https://github.com/HighKcal/PC-Resource-Monitor.git
 cd PC-Resource-Monitor
 .\build.cmd
 .\build-monitor.cmd
