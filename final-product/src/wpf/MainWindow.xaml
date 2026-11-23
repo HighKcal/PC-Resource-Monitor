@@ -1,0 +1,210 @@
+<!-- 주 화면의 리소스·목록 행·상세 카드 구조다. MainWindow.xaml.cs가 복사본을 표시하고,
+     ViewListViewport.cs가 열 폭을, WindowController.cs가 worker와 명령을 연결한다. -->
+<Window x:Class="PcMonitor.MainWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:local="clr-namespace:PcMonitor"
+        xmlns:shell="clr-namespace:System.Windows.Shell;assembly=PresentationFramework"
+        Title="내 PC 자원 모니터" Width="1440" Height="784" MinWidth="660" MinHeight="520"
+        WindowStyle="None" ResizeMode="CanResize" Background="#F1F4F1"
+        FontFamily="pack://application:,,,/Assets/#Noto Sans KR" Foreground="#172D2C"
+        TextOptions.TextRenderingMode="Grayscale"
+        UseLayoutRounding="True" SnapsToDevicePixels="True" SizeChanged="OnWindowSizeChanged">
+  <shell:WindowChrome.WindowChrome><shell:WindowChrome CaptionHeight="42" ResizeBorderThickness="6" GlassFrameThickness="0" CornerRadius="0" UseAeroCaptionButtons="False"/></shell:WindowChrome.WindowChrome>
+  <Window.Resources>
+    <SolidColorBrush x:Key="Ink" Color="#172D2C"/>
+    <SolidColorBrush x:Key="Muted" Color="#506562"/>
+    <SolidColorBrush x:Key="Teal" Color="#147865"/>
+    <Style TargetType="Button">
+      <Setter Property="Foreground" Value="{StaticResource Ink}"/><Setter Property="Background" Value="White"/>
+      <Setter Property="BorderBrush" Value="#D5DFD9"/><Setter Property="BorderThickness" Value="1"/>
+      <Setter Property="Padding" Value="11,6"/><Setter Property="MinHeight" Value="32"/><Setter Property="FontSize" Value="13"/>
+      <Setter Property="Cursor" Value="Hand"/>
+      <Setter Property="Template"><Setter.Value><ControlTemplate TargetType="Button">
+        <Border x:Name="ButtonBorder" Background="{TemplateBinding Background}" BorderBrush="{TemplateBinding BorderBrush}" BorderThickness="{TemplateBinding BorderThickness}" CornerRadius="6" Padding="{TemplateBinding Padding}">
+          <ContentPresenter HorizontalAlignment="{TemplateBinding HorizontalContentAlignment}" VerticalAlignment="Center"/>
+        </Border>
+        <ControlTemplate.Triggers>
+          <Trigger Property="IsMouseOver" Value="True"><Setter TargetName="ButtonBorder" Property="Background" Value="#E7F3ED"/></Trigger>
+          <Trigger Property="IsKeyboardFocused" Value="True"><Setter TargetName="ButtonBorder" Property="BorderBrush" Value="#147865"/><Setter TargetName="ButtonBorder" Property="BorderThickness" Value="2"/></Trigger>
+          <Trigger Property="IsEnabled" Value="False"><Setter Property="Opacity" Value="0.45"/></Trigger>
+        </ControlTemplate.Triggers>
+      </ControlTemplate></Setter.Value></Setter>
+    </Style>
+    <Style x:Key="TitleButton" TargetType="Button" BasedOn="{StaticResource {x:Type Button}}">
+      <Setter Property="Background" Value="Transparent"/><Setter Property="BorderThickness" Value="0"/><Setter Property="Padding" Value="0"/><Setter Property="Width" Value="50"/><Setter Property="Height" Value="42"/>
+      <Setter Property="shell:WindowChrome.IsHitTestVisibleInChrome" Value="True"/>
+    </Style>
+    <Style x:Key="Panel" TargetType="Border"><Setter Property="Background" Value="White"/><Setter Property="BorderBrush" Value="#D5DFD9"/><Setter Property="BorderThickness" Value="1"/><Setter Property="CornerRadius" Value="13"/></Style>
+    <Style x:Key="ComparisonCard" TargetType="Border">
+      <Setter Property="Background" Value="#F7F9F7"/><Setter Property="TextElement.Foreground" Value="#172D2C"/>
+      <Setter Property="CornerRadius" Value="9"/><Setter Property="Padding" Value="13,9"/>
+    </Style>
+    <Style x:Key="AverageCardStyle" TargetType="Border" BasedOn="{StaticResource ComparisonCard}">
+      <Style.Triggers><Trigger Property="Tag" Value="exceeded"><Setter Property="Background" Value="#FFF2DD"/><Setter Property="TextElement.Foreground" Value="#955014"/></Trigger></Style.Triggers>
+    </Style>
+    <Style x:Key="CurrentCardStyle" TargetType="Border" BasedOn="{StaticResource ComparisonCard}">
+      <Style.Triggers><Trigger Property="Tag" Value="current"><Setter Property="Background" Value="#E7F3ED"/><Setter Property="TextElement.Foreground" Value="#147865"/></Trigger></Style.Triggers>
+    </Style>
+    <Style TargetType="TextBlock"><Setter Property="VerticalAlignment" Value="Center"/></Style>
+    <Style x:Key="Number" TargetType="TextBlock"><Setter Property="FontFamily" Value="pack://application:,,,/Assets/#IBM Plex Mono"/><Setter Property="FontWeight" Value="Medium"/><Setter Property="FontSize" Value="16"/><Setter Property="TextAlignment" Value="Right"/><Setter Property="VerticalAlignment" Value="Center"/><Setter Property="Margin" Value="0,0,19,0"/></Style>
+    <Style x:Key="HeaderButton" TargetType="Button" BasedOn="{StaticResource {x:Type Button}}"><Setter Property="Background" Value="Transparent"/><Setter Property="BorderThickness" Value="0"/><Setter Property="Padding" Value="0,4,19,4"/><Setter Property="HorizontalContentAlignment" Value="Right"/></Style>
+    <Style TargetType="ListBoxItem">
+      <Setter Property="HorizontalContentAlignment" Value="Stretch"/><Setter Property="Padding" Value="0"/><Setter Property="Margin" Value="0"/><Setter Property="BorderThickness" Value="0"/>
+      <Setter Property="Template"><Setter.Value><ControlTemplate TargetType="ListBoxItem">
+        <Grid Background="{Binding Background}">
+          <Border x:Name="Hover" Background="Transparent"/>
+          <ContentPresenter/>
+          <Border x:Name="SelectionBorder" BorderBrush="Transparent" BorderThickness="1" CornerRadius="3" IsHitTestVisible="False"/>
+          <Border x:Name="SelectionLine" Width="4" Margin="0,2,0,2" HorizontalAlignment="Left" Background="Transparent" CornerRadius="2" IsHitTestVisible="False"/>
+        </Grid>
+        <ControlTemplate.Triggers>
+          <Trigger Property="IsMouseOver" Value="True"><Setter TargetName="Hover" Property="Background" Value="#0C147865"/></Trigger>
+          <Trigger Property="IsSelected" Value="True"><Setter TargetName="SelectionBorder" Property="BorderBrush" Value="#147865"/><Setter TargetName="SelectionLine" Property="Background" Value="#147865"/></Trigger>
+          <Trigger Property="IsKeyboardFocusWithin" Value="True"><Setter TargetName="SelectionBorder" Property="BorderBrush" Value="#147865"/></Trigger>
+        </ControlTemplate.Triggers>
+      </ControlTemplate></Setter.Value></Setter>
+    </Style>
+    <!-- 행 값과 부분합 표기는 ViewListRow에서 온다. 헤더와 같은 열 폭 속성을 바인딩한다. -->
+    <DataTemplate x:Key="RowTemplate">
+      <Grid Height="52" MinWidth="{Binding ListColumnsMinimumWidth, RelativeSource={RelativeSource AncestorType=local:MainWindow}}" ToolTip="{Binding Tooltip}">
+        <Grid.ColumnDefinitions>
+          <ColumnDefinition Width="{Binding NameColumnWidth, RelativeSource={RelativeSource AncestorType=local:MainWindow}}" MinWidth="250"/>
+          <ColumnDefinition Width="{Binding MetricColumnWidth, RelativeSource={RelativeSource AncestorType=local:MainWindow}}" MinWidth="{Binding MetricColumnMinimumWidth, RelativeSource={RelativeSource AncestorType=local:MainWindow}}"/>
+          <ColumnDefinition Width="{Binding MetricColumnWidth, RelativeSource={RelativeSource AncestorType=local:MainWindow}}" MinWidth="{Binding MetricColumnMinimumWidth, RelativeSource={RelativeSource AncestorType=local:MainWindow}}"/>
+          <ColumnDefinition Width="{Binding MetricColumnWidth, RelativeSource={RelativeSource AncestorType=local:MainWindow}}" MinWidth="{Binding MetricColumnMinimumWidth, RelativeSource={RelativeSource AncestorType=local:MainWindow}}"/>
+          <ColumnDefinition Width="{Binding IoColumnWidth, RelativeSource={RelativeSource AncestorType=local:MainWindow}}" MinWidth="{Binding MetricColumnMinimumWidth, RelativeSource={RelativeSource AncestorType=local:MainWindow}}"/>
+          <ColumnDefinition Width="{Binding IoColumnWidth, RelativeSource={RelativeSource AncestorType=local:MainWindow}}" MinWidth="{Binding MetricColumnMinimumWidth, RelativeSource={RelativeSource AncestorType=local:MainWindow}}"/>
+        </Grid.ColumnDefinitions>
+        <Grid Grid.Column="0">
+          <Border Width="1" HorizontalAlignment="Left" Margin="26,0,0,0" Background="#D5DFD9" Visibility="{Binding MemberVisibility}"/>
+          <Border Width="11" Height="1" HorizontalAlignment="Left" Margin="26,0,0,0" Background="#D5DFD9" Visibility="{Binding MemberVisibility}"/>
+          <Button Width="27" MinHeight="27" Height="30" Padding="7" Margin="3,0,0,0" HorizontalAlignment="Left" Background="Transparent" BorderThickness="0" Click="OnExpandRow" Tag="{Binding Key}" Visibility="{Binding GroupVisibility}" ToolTip="그룹 접기 / 펼치기">
+            <Image Source="Assets/down.png" Width="13" Height="13" RenderTransformOrigin="0.5,0.5"><Image.RenderTransform><RotateTransform Angle="{Binding ChevronAngle}"/></Image.RenderTransform></Image>
+          </Button>
+          <Ellipse Width="10" Height="10" Fill="{Binding Color}" Margin="32,0,0,0" HorizontalAlignment="Left" Visibility="{Binding GroupVisibility}"/>
+          <Grid Margin="{Binding NameMargin}" HorizontalAlignment="Left" VerticalAlignment="Center"><Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+            <TextBlock Text="{Binding Name}" FontSize="16" FontWeight="{Binding NameWeight}" TextTrimming="CharacterEllipsis" VerticalAlignment="Center"/>
+            <StackPanel Grid.Column="1" Orientation="Horizontal" VerticalAlignment="Center">
+              <TextBlock Text="{Binding Subtitle}" FontSize="12" Foreground="{StaticResource Muted}" Margin="14,0,3,0" TextTrimming="CharacterEllipsis" Visibility="{Binding SubtitleVisibility}"/>
+              <Border Background="#FFF0D5" CornerRadius="6" Padding="6,3" Margin="12,0,3,0" VerticalAlignment="Center" Visibility="{Binding AlertVisibility}">
+                <StackPanel Orientation="Horizontal"><Image Source="Assets/bell.png" Width="15" Height="15" Margin="0,0,3,0"/><TextBlock Text="{Binding AlertLabel}" FontSize="12" FontWeight="Bold" Foreground="#955014"/></StackPanel>
+              </Border>
+            </StackPanel>
+          </Grid>
+        </Grid>
+        <TextBlock Grid.Column="1" Text="{Binding Cpu}" Style="{StaticResource Number}"/>
+        <TextBlock Grid.Column="2" Text="{Binding Gpu}" Style="{StaticResource Number}"/>
+        <TextBlock Grid.Column="3" Text="{Binding Ram}" Style="{StaticResource Number}"/>
+        <TextBlock Grid.Column="4" Text="{Binding Read}" Style="{StaticResource Number}" TextTrimming="CharacterEllipsis"/>
+        <TextBlock Grid.Column="5" Text="{Binding Write}" Style="{StaticResource Number}" TextTrimming="CharacterEllipsis"/>
+        <Border Grid.ColumnSpan="6" Height="1" VerticalAlignment="Bottom" Margin="15,0" Background="#E4EAE6"/>
+      </Grid>
+    </DataTemplate>
+  </Window.Resources>
+  <Grid x:Name="RootGrid">
+    <Grid.RowDefinitions><RowDefinition Height="42"/><RowDefinition x:Name="PageHeaderRow" Height="74"/><RowDefinition Height="Auto"/><RowDefinition Height="*"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
+    <Border Grid.Row="0" Background="#152D30">
+      <Grid><Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+        <StackPanel Orientation="Horizontal" Margin="26,0,0,0"><Image Source="Assets/wave.png" Width="24" Height="24"/><TextBlock Text="내 PC 자원 모니터" Foreground="#E5F1EB" FontSize="15" Margin="14,0,0,0"/></StackPanel>
+        <StackPanel Grid.Column="1" Orientation="Horizontal">
+          <Button Style="{StaticResource TitleButton}" Click="OnMinimize" AutomationProperties.Name="최소화"><Image Source="Assets/min.png" Width="19" Height="19"/></Button>
+          <Button Style="{StaticResource TitleButton}" Click="OnMaximize" AutomationProperties.Name="최대화 / 복원"><Image Source="Assets/max.png" Width="17" Height="17"/></Button>
+          <Button Style="{StaticResource TitleButton}" Click="OnClose" AutomationProperties.Name="종료"><Image Source="Assets/close.png" Width="19" Height="19"/></Button>
+        </StackPanel>
+      </Grid>
+    </Border>
+    <Grid Grid.Row="1" Margin="32,0"><Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/><ColumnDefinition Width="Auto"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+      <TextBlock x:Name="PageTitle" Text="내 PC 자원 현황" FontSize="34" FontWeight="Bold" TextTrimming="CharacterEllipsis"/>
+      <StackPanel Grid.Column="1" Orientation="Horizontal">
+      <Button Content="검색·조작" Click="OnToggleToolbar" Height="34" Padding="11,5" ToolTip="검색·정렬·일시정지·구성원 편집·알림 설정"/>
+      <Button x:Name="SidebarButton" Click="OnToggleSidebar" Margin="12,0" Height="34" Width="136" Padding="10,5">
+        <StackPanel Orientation="Horizontal"><Image Source="Assets/layer.png" Width="16" Height="16" Margin="0,0,6,0"/><TextBlock x:Name="SidebarLabel" Text="사이드바 접기" FontSize="14"/></StackPanel>
+      </Button>
+      </StackPanel>
+      <TextBlock Grid.Column="2" x:Name="MeasuredTime" Foreground="{StaticResource Muted}" FontSize="14" Margin="16,0,25,0"/>
+      <Border x:Name="DataModeBadge" Grid.Column="3" Background="#DFF1E9" CornerRadius="6" Padding="7,3" VerticalAlignment="Center" MinWidth="147">
+        <StackPanel Orientation="Horizontal"><Image Source="Assets/pulse.png" Width="15" Height="15" Margin="0,0,4,0"/><TextBlock x:Name="DataMode" Text="첫 표본 대기" FontSize="12" FontWeight="Bold" Foreground="#147865"/></StackPanel>
+      </Border>
+    </Grid>
+    <ScrollViewer x:Name="ToolbarScroll" Grid.Row="2" Margin="32,0,32,0" MaxHeight="130" HorizontalScrollBarVisibility="Disabled" VerticalScrollBarVisibility="Auto">
+    <WrapPanel x:Name="Toolbar" Margin="0,0,0,12" Visibility="Collapsed">
+      <TextBox x:Name="SearchBox" Width="218" Height="32" FontSize="13" Padding="9,5" BorderBrush="#D5DFD9" VerticalContentAlignment="Center" TextChanged="OnSearchChanged" ToolTip="이름·경로·PID 검색" AutomationProperties.Name="프로세스 검색"/>
+      <ComboBox x:Name="SortBox" Width="137" Height="32" Margin="7,0,7,0" Padding="7,4" SelectedIndex="0" SelectionChanged="OnSortChanged" AutomationProperties.Name="목록 정렬">
+        <ComboBoxItem Content="기본 순"/><ComboBoxItem Content="CPU 높은 순"/><ComboBoxItem Content="RAM 높은 순"/><ComboBoxItem Content="GPU 높은 순"/><ComboBoxItem Content="읽기 높은 순"/><ComboBoxItem Content="쓰기 높은 순"/><ComboBoxItem Content="이름 순"/>
+      </ComboBox>
+      <Button x:Name="PauseButton" Content="일시정지" Click="OnPause" Margin="0,0,7,0"/>
+      <Button Content="구성원 편집" Click="OnGroupMenu" Margin="0,0,7,0"/>
+      <Button Content="알림 설정" Click="OnNotificationMenu" Margin="0,0,7,0"/>
+      <Button Content="더 보기" Click="OnMoreMenu" Margin="0,0,7,0"/>
+      <TextBlock x:Name="CollectionStatus" Text="첫 표본을 기다리는 중" Foreground="{StaticResource Muted}" FontSize="12" Margin="5,4" TextWrapping="Wrap" MaxWidth="530"/>
+    </WrapPanel>
+    </ScrollViewer>
+    <ScrollViewer x:Name="ContentScroll" Grid.Row="3" Margin="32,0,32,0" HorizontalScrollBarVisibility="Auto" VerticalScrollBarVisibility="Disabled">
+    <Grid x:Name="ContentGrid">
+      <Grid.ColumnDefinitions><ColumnDefinition x:Name="ListColumn" Width="512"/><ColumnDefinition x:Name="GapColumn" Width="16"/><ColumnDefinition x:Name="DetailColumn" Width="*"/></Grid.ColumnDefinitions>
+      <Border x:Name="ListPanel" Grid.Column="0" Style="{StaticResource Panel}">
+        <Grid><Grid.RowDefinitions><RowDefinition x:Name="ListTitleRow" Height="55"/><RowDefinition x:Name="ListHeaderRow" Height="58"/><RowDefinition Height="*"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
+          <Grid Margin="20,0"><Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions><TextBlock Text="프로그램과 구성원" FontSize="22" FontWeight="Bold"/><TextBlock x:Name="ProcessCount" Grid.Column="1" Text="프로세스 0개" FontSize="12" Foreground="{StaticResource Muted}"/></Grid>
+          <Grid Grid.Row="1" Background="#F7F9F7">
+          <Border x:Name="ListHeaderViewport" Background="#F7F9F7" ClipToBounds="True" HorizontalAlignment="Left">
+          <Grid x:Name="ListHeaderGrid" Background="#F7F9F7" HorizontalAlignment="Left" MinWidth="{Binding ListColumnsMinimumWidth, RelativeSource={RelativeSource AncestorType=local:MainWindow}}"><Grid.ColumnDefinitions>
+            <ColumnDefinition Width="{Binding NameColumnWidth, RelativeSource={RelativeSource AncestorType=local:MainWindow}}" MinWidth="250"/>
+            <ColumnDefinition Width="{Binding MetricColumnWidth, RelativeSource={RelativeSource AncestorType=local:MainWindow}}" MinWidth="{Binding MetricColumnMinimumWidth, RelativeSource={RelativeSource AncestorType=local:MainWindow}}"/>
+            <ColumnDefinition Width="{Binding MetricColumnWidth, RelativeSource={RelativeSource AncestorType=local:MainWindow}}" MinWidth="{Binding MetricColumnMinimumWidth, RelativeSource={RelativeSource AncestorType=local:MainWindow}}"/>
+            <ColumnDefinition Width="{Binding MetricColumnWidth, RelativeSource={RelativeSource AncestorType=local:MainWindow}}" MinWidth="{Binding MetricColumnMinimumWidth, RelativeSource={RelativeSource AncestorType=local:MainWindow}}"/>
+            <ColumnDefinition Width="{Binding IoColumnWidth, RelativeSource={RelativeSource AncestorType=local:MainWindow}}" MinWidth="{Binding MetricColumnMinimumWidth, RelativeSource={RelativeSource AncestorType=local:MainWindow}}"/>
+            <ColumnDefinition Width="{Binding IoColumnWidth, RelativeSource={RelativeSource AncestorType=local:MainWindow}}" MinWidth="{Binding MetricColumnMinimumWidth, RelativeSource={RelativeSource AncestorType=local:MainWindow}}"/>
+          </Grid.ColumnDefinitions>
+            <Button Content="이름" HorizontalContentAlignment="Left" Margin="21,0,0,0" Style="{StaticResource HeaderButton}" Tag="6" Click="OnSortHeader"/>
+            <Button Grid.Column="1" Style="{StaticResource HeaderButton}" Tag="1" Click="OnSortHeader"><StackPanel><TextBlock Text="CPU" FontSize="18" FontWeight="Bold" Foreground="{StaticResource Muted}" TextAlignment="Right"/><TextBlock x:Name="CpuTotal" Text="—" FontSize="13" TextAlignment="Right"/></StackPanel></Button>
+            <Button Grid.Column="2" Style="{StaticResource HeaderButton}" Tag="3" Click="OnSortHeader"><StackPanel><TextBlock Text="GPU" FontSize="18" FontWeight="Bold" Foreground="{StaticResource Muted}" TextAlignment="Right"/><TextBlock x:Name="GpuTotal" Text="—" FontSize="13" TextAlignment="Right"/></StackPanel></Button>
+            <Button Grid.Column="3" Style="{StaticResource HeaderButton}" Tag="2" Click="OnSortHeader" ToolTip="전체: 시스템 물리 RAM 사용률. 행: Working Set / 물리 RAM. 공유 페이지가 중복될 수 있습니다."><StackPanel><TextBlock Text="RAM" FontSize="18" FontWeight="Bold" Foreground="{StaticResource Muted}" TextAlignment="Right"/><TextBlock x:Name="RamTotal" Text="—" FontSize="13" TextAlignment="Right"/></StackPanel></Button>
+            <Button Grid.Column="4" Content="읽기 MB/s" FontSize="12" Style="{StaticResource HeaderButton}" Tag="4" Click="OnSortHeader"/>
+            <Button Grid.Column="5" Content="쓰기 MB/s" FontSize="12" Style="{StaticResource HeaderButton}" Tag="5" Click="OnSortHeader"/>
+          </Grid>
+          </Border>
+          </Grid>
+          <ListBox x:Name="ProcessList" Grid.Row="2" BorderThickness="0" Padding="0" Background="Transparent" ItemTemplate="{StaticResource RowTemplate}" ScrollViewer.HorizontalScrollBarVisibility="Disabled" ScrollViewer.VerticalScrollBarVisibility="Auto" ScrollViewer.CanContentScroll="True" VirtualizingPanel.IsVirtualizing="True" VirtualizingPanel.VirtualizationMode="Recycling" Loaded="OnListViewportLoaded" SizeChanged="OnListViewportSizeChanged" IsVisibleChanged="OnListViewportVisibilityChanged" ScrollViewer.ScrollChanged="OnListViewportScrollChanged" SelectionChanged="OnListSelectionChanged" PreviewKeyDown="OnListKeyDown" MouseDoubleClick="OnListDoubleClick" PreviewMouseRightButtonDown="OnListRightClick" AutomationProperties.Name="프로그램과 구성원 목록"/>
+          <Border x:Name="ListFooter" Grid.Row="3" BorderBrush="#D5DFD9" BorderThickness="0,1,0,0" Padding="20,12"><TextBlock x:Name="ListFootnote" Text="— 결측은 0이 아닙니다" FontSize="12" Foreground="{StaticResource Muted}" TextWrapping="Wrap"/></Border>
+        </Grid>
+      </Border>
+      <ScrollViewer x:Name="DetailScroll" Grid.Column="2" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
+        <StackPanel>
+          <Border Style="{StaticResource Panel}" MinHeight="351">
+            <Grid Margin="20,0"><Grid.RowDefinitions><RowDefinition Height="62"/><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
+              <Grid><Grid.ColumnDefinitions><ColumnDefinition Width="Auto"/><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+                <Ellipse x:Name="SelectedGroupDot" Width="11" Height="11" Margin="0,0,11,0" Visibility="Collapsed"/>
+                <TextBlock x:Name="ChartTitle" Grid.Column="1" Text="PC 전체 현황" FontSize="22" FontWeight="Bold" TextTrimming="CharacterEllipsis"/>
+                <StackPanel Grid.Column="2" Orientation="Horizontal" Margin="15,0,0,0"><Ellipse Width="10" Height="10" Fill="#DEE7E0" Margin="0,0,8,0"/><TextBlock Text="여유" FontSize="13" Foreground="{StaticResource Muted}"/></StackPanel>
+              </Grid>
+              <Grid Grid.Row="1"><Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="*"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions><local:DonutChart x:Name="CpuChart"/><local:DonutChart x:Name="GpuChart" Grid.Column="1"/><local:DonutChart x:Name="RamChart" Grid.Column="2"/></Grid>
+              <Expander Grid.Row="2" x:Name="ChartExplanation" Header="측정 기준과 귀속 범위" FontSize="11" Foreground="{StaticResource Muted}" Margin="0,0,0,10"><TextBlock x:Name="ChartExplanationText" TextWrapping="Wrap" Margin="0,5,0,0"/></Expander>
+            </Grid>
+          </Border>
+          <Border Style="{StaticResource Panel}" Margin="0,14,0,0" MinHeight="278">
+            <Grid Margin="21,12,21,13">
+              <StackPanel x:Name="EmptyAnalysis"><TextBlock Text="개별 분석" FontSize="16" FontWeight="Bold" Foreground="{StaticResource Muted}"/><TextBlock x:Name="EmptyAnalysisText" Text="프로세스를 선택하세요" FontSize="24" FontWeight="Bold" HorizontalAlignment="Center" Margin="0,60,0,50" TextWrapping="Wrap"/></StackPanel>
+              <StackPanel x:Name="Analysis" Visibility="Collapsed">
+                <DockPanel><Button x:Name="AnalysisMenuButton" DockPanel.Dock="Right" Content="원인 지표 ▾" Width="104" Padding="8,0" MinHeight="27" Height="27" Click="OnAnalysisMenu" ToolTip="CPU·RAM·읽기·쓰기 근거, 이 프로그램 알아보기" AutomationProperties.Name="원인 지표와 프로그램 정보 메뉴"/><DockPanel><Image x:Name="AnalysisBell" DockPanel.Dock="Left" Source="Assets/bell-large.png" Width="20" Height="20" Margin="0,0,9,0"/><TextBlock x:Name="AnalysisTarget" FontSize="17" FontWeight="Bold" Foreground="#955014" TextWrapping="Wrap"/></DockPanel></DockPanel>
+                <TextBlock x:Name="AnalysisReason" FontSize="25" FontWeight="Bold" TextWrapping="Wrap" Margin="0,13,0,3"/>
+                <TextBlock x:Name="AnalysisMetric" FontSize="12" Foreground="{StaticResource Muted}" Margin="0,0,0,13" TextWrapping="Wrap"/>
+                <TextBlock x:Name="RecentComparisonNote" FontSize="12" Foreground="{StaticResource Muted}" Margin="0,0,0,10" TextWrapping="Wrap" Visibility="Collapsed"/>
+                <!-- 카드 이름은 공용 자리다. RenderAnalysis가 지표별 근거를 고른 뒤 제목·값·시각과
+                     Tag를 함께 갱신한다. XAML의 강조색은 후보·초과 여부를 새로 판정하지 않는다. -->
+                <UniformGrid Columns="3">
+                  <Border x:Name="AverageCard" Style="{StaticResource AverageCardStyle}" Margin="0,0,7,0"><StackPanel><TextBlock x:Name="AverageTitle" Text="당시 구간 평균" FontSize="14"/><TextBlock x:Name="AverageValue" FontSize="26" FontWeight="Bold" Margin="0,2"/><TextBlock x:Name="AverageTime" Foreground="{StaticResource Muted}" FontSize="12" TextWrapping="Wrap"/></StackPanel></Border>
+                  <Border x:Name="UpperCard" Style="{StaticResource ComparisonCard}" Margin="6,0,6,0"><StackPanel><TextBlock x:Name="UpperTitle" Text="당시 평소 상한" FontSize="14"/><TextBlock x:Name="UpperValue" FontSize="26" FontWeight="Bold" Margin="0,2"/><TextBlock x:Name="UpperTime" Foreground="{StaticResource Muted}" FontSize="12" TextWrapping="Wrap"/></StackPanel></Border>
+                  <Border x:Name="CurrentCard" Style="{StaticResource CurrentCardStyle}" Margin="7,0,0,0"><StackPanel><TextBlock x:Name="CurrentTitle" Text="현재 RAM" FontSize="14"/><TextBlock x:Name="CurrentValue" FontSize="26" FontWeight="Bold" Margin="0,2"/><TextBlock x:Name="CurrentTime" Foreground="{StaticResource Muted}" FontSize="12" TextWrapping="Wrap"/></StackPanel></Border>
+                </UniformGrid>
+                <TextBlock x:Name="SelectedIo" FontSize="13" Foreground="{StaticResource Muted}" Margin="0,8,0,9" TextWrapping="Wrap"/>
+              </StackPanel>
+            </Grid>
+          </Border>
+        </StackPanel>
+      </ScrollViewer>
+    </Grid>
+    </ScrollViewer>
+    <Border Grid.Row="4" Padding="32,0,32,8"><TextBlock x:Name="CommandStatusText" FontSize="11" Foreground="{StaticResource Muted}" TextWrapping="Wrap"/></Border>
+  </Grid>
+</Window>

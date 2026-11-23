@@ -1,0 +1,7 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <Import Project="Runner.props"/>
+  <ItemGroup>
+    <Compile Include="../src/tests/wpf/session-group-status/SessionGroupStatus.cs" Link="SessionGroupStatus.cs"/>
+    <Reference Include="PcResourceMonitor"><HintPath>$(ProductDir)/PcResourceMonitor.dll</HintPath></Reference>
+  </ItemGroup>
+</Project>

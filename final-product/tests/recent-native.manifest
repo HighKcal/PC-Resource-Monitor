@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<!-- C recent fixture의 ANSI 경로 API와 제품의 UTF-8 DB 경로 계약을 같은 인코딩으로 맞춘다.
+     이 manifest는 해당 시험 exe에만 연결하며 제품 실행물에는 사용하지 않는다. -->
+<assembly xmlns="urn:schemas-microsoft-com:asm.v1" manifestVersion="1.0">
+  <assemblyIdentity type="win32" name="PcMonitor.Tests.RecentNative" version="1.0.0.0"/>
+  <application xmlns="urn:schemas-microsoft-com:asm.v3">
+    <windowsSettings>
+      <activeCodePage xmlns="http://schemas.microsoft.com/SMI/2019/WindowsSettings">UTF-8</activeCodePage>
+    </windowsSettings>
+  </application>
+</assembly>

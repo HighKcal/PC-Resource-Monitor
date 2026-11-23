@@ -1,0 +1,7 @@
+﻿<Project Sdk="Microsoft.NET.Sdk">
+  <Import Project="Runner.props"/>
+  <ItemGroup>
+    <Compile Include="../src/tests/wpf/program-info-display/ProgramInfoDisplay.cs" Link="ProgramInfoDisplay.cs"/>
+    <Reference Include="PcResourceMonitor"><HintPath>$(ProductDir)/PcResourceMonitor.dll</HintPath></Reference>
+  </ItemGroup>
+</Project>

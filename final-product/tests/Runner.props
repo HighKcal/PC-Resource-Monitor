@@ -1,0 +1,18 @@
+﻿<Project>
+  <!-- 제품 DLL을 참조하는 시험은 생산 assembly와 native DLL을 그대로 복사한다.
+       시험 자체는 일반 권한 manifest로 실행하며 제품 출력은 수정하지 않는다. -->
+  <PropertyGroup>
+    <OutputType>Exe</OutputType><TargetFramework>net10.0-windows</TargetFramework>
+    <RuntimeIdentifier>win-x64</RuntimeIdentifier><PlatformTarget>x64</PlatformTarget>
+    <UseWPF>true</UseWPF><Nullable>enable</Nullable><SelfContained>false</SelfContained>
+    <EnableDefaultItems>false</EnableDefaultItems><ImplicitUsings>disable</ImplicitUsings>
+    <AssemblySearchPaths>{HintPathFromItem};{RawFileName};{TargetFrameworkDirectory}</AssemblySearchPaths>
+    <ApplicationManifest>../src/wpf/validation.manifest</ApplicationManifest>
+    <DebugType>None</DebugType><DebugSymbols>false</DebugSymbols>
+    <TestNative Condition="'$(TestNative)' == ''">$(ProductDir)/MonitorBridge.dll</TestNative>
+  </PropertyGroup>
+  <ItemGroup>
+    <Resource Include="../src/wpf/Assets/*.otf;../src/wpf/Assets/*.ttf" Link="Assets/%(Filename)%(Extension)"/>
+    <None Include="$(TestNative)" Link="MonitorBridge.dll" CopyToOutputDirectory="Always" CopyToPublishDirectory="Always"/>
+  </ItemGroup>
+</Project>

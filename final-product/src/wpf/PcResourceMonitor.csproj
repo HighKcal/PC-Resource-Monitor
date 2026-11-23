@@ -1,0 +1,26 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net10.0-windows</TargetFramework>
+    <RuntimeIdentifier>win-x64</RuntimeIdentifier>
+    <PlatformTarget>x64</PlatformTarget>
+    <UseWPF>true</UseWPF>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>disable</ImplicitUsings>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+    <RootNamespace>PcMonitor</RootNamespace>
+    <AssemblyName>PcResourceMonitor</AssemblyName>
+    <StartupObject>PcMonitor.App</StartupObject>
+    <!-- 제품 권한 manifest와 일반 권한 검증용 manifest를 빌드 속성으로 선택한다. -->
+    <ApplicationManifest>app.manifest</ApplicationManifest>
+    <ApplicationManifest Condition="'$(ValidationAsInvoker)' == 'true'">validation.manifest</ApplicationManifest>
+    <SelfContained>true</SelfContained>
+    <DebuggerSupport>false</DebuggerSupport>
+    <SatelliteResourceLanguages>ko;en</SatelliteResourceLanguages>
+  </PropertyGroup>
+  <ItemGroup>
+    <Resource Include="Assets\*.png" />
+    <Resource Include="Assets\*.otf;Assets\*.ttf" />
+    <None Update="Assets\*-LICENSE.txt" CopyToPublishDirectory="PreserveNewest" />
+  </ItemGroup>
+</Project>

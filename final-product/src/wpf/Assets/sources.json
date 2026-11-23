@@ -1,0 +1,24 @@
+{
+  "figma": {
+    "fileKey": "OpzwqKIHIrBL4dZ3GNWQiW",
+    "screenNode": "25:1536",
+    "startNode": "25:169",
+    "icons": {
+      "wave": { "node": "2:4", "width": 24, "height": 24 },
+      "min": { "node": "2:7", "width": 19, "height": 19 },
+      "max": { "node": "2:9", "width": 17, "height": 17 },
+      "close": { "node": "2:11", "width": 19, "height": 19 },
+      "pulse": { "node": "24:188", "width": 15, "height": 15 },
+      "layer": { "node": "29:7333", "width": 16, "height": 16 },
+      "down": { "node": "24:208", "width": 13, "height": 13 },
+      "bell": { "node": "24:222", "width": 15, "height": 15 },
+      "bell-large": { "node": "25:2222", "width": 20, "height": 20 }
+    },
+    "conversion": "Original SVGs preserved. Local PNGs are exact four-times rasterizations by resvg; WPF renders each at its original design dimensions. Donut arcs and group dots are live data, not static Figma assets."
+  },
+  "fonts": [
+    { "family": "Noto Sans KR", "faces": ["Regular", "Medium", "Bold"], "source": "https://github.com/notofonts/noto-cjk/tree/main/Sans/SubsetOTF/KR", "licenseSource": "https://github.com/notofonts/noto-cjk/blob/main/Sans/LICENSE", "localLicense": "NotoSansKR-LICENSE.txt" },
+    { "family": "IBM Plex Mono", "faces": ["Medium"], "source": "https://github.com/IBM/plex/tree/master/packages/plex-mono/fonts/complete/ttf", "licenseSource": "https://github.com/IBM/plex/blob/master/LICENSE.txt", "localLicense": "IBMPlexMono-LICENSE.txt" },
+    { "family": "Inter", "faces": ["Bold"], "source": "https://github.com/rsms/inter/releases/tag/v4.1", "licenseSource": "https://github.com/rsms/inter/blob/master/LICENSE.txt", "localLicense": "Inter-LICENSE.txt" }
+  ]
+}
