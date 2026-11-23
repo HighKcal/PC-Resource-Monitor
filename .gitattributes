@@ -4,4 +4,4 @@
 *.png binary
 *.ttf binary
 *.otf binary
-final-product/src/third_party/sqlite/* -whitespace
+src/third_party/sqlite/* -whitespace
