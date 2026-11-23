@@ -29,3 +29,11 @@
 *.key
 *.pfx
 *.p12
+
+# 빌드와 회귀 실행이 만드는 중간 파일과 시험 결과
+.build/
+.test-results/
+
+# 저장소에 동봉하는 Windows x64 실행 파일과 DLL
+!/bin/win-x64/*.exe
+!/bin/win-x64/**/*.dll
