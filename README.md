@@ -4,6 +4,17 @@ Windows C 자원 수집기, SQLite 로컬 이력, 개인화 Baseline 비교와 W
 
 중간 제출본은 [원본 저장소](https://github.com/HighKcal/PC-Resource-Monitor)의 `main` 브랜치를 기준으로 받는다. 후속 변경은 작업 브랜치에서 개발하고 PR로 `main`에 통합한다. 자세한 절차는 [Fork·PR 안내](CONTRIBUTING.md)를 따른다.
 
+## 팀 최종본 · Windows x64
+
+[최종 제품 안내](final-product/README.md)에서 소스와 시험 구성을 확인할 수 있다. 실행하려면 [win-x64 폴더](final-product/bin/win-x64) 전체를 함께 두고 그 안의 `PcResourceMonitor.exe`를 연다.
+
+직접 빌드하고 대표 회귀 19종을 실행하려면 x64 .NET 10 SDK, Visual Studio C++ 빌드 도구와 Windows SDK가 필요하다. 저장소 루트에서 PowerShell로 실행한다.
+
+```powershell
+.\final-product\build.ps1
+.\final-product\test.ps1 -SkipBuild
+```
+
 ## 현재 구현 범위
 
 - PID+생성시각으로 연결하는 한 회차 수집, 필드별 유효성·실패 진단, 실제 QPC 간격에 따른 CPU·I/O 계산.

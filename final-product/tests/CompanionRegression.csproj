@@ -1,0 +1,13 @@
+﻿<Project Sdk="Microsoft.NET.Sdk">
+  <Import Project="Runner.props"/>
+  <!-- 이 회귀만 제품 내부 멤버를 검사하기 위해 원본 C#/XAML을 연결한다.
+       fixture native DLL은 TestNative로 전달하며 공식 제품 DLL을 덮어쓰지 않는다. -->
+  <PropertyGroup><ImplicitUsings>enable</ImplicitUsings><TreatWarningsAsErrors>true</TreatWarningsAsErrors></PropertyGroup>
+  <ItemGroup>
+    <Compile Include="../src/wpf/ProgramInfoWindow.xaml.cs" Link="ProgramInfoWindow.xaml.cs"/>
+    <Compile Include="../src/wpf/TrayHost.cs" Link="TrayHost.cs"/>
+    <Compile Include="../src/wpf/Engine.cs" Link="Engine.cs"/>
+    <Compile Include="../src/tests/wpf/program-info-display/CompanionRegression.cs" Link="CompanionRegression.cs"/>
+    <Page Include="../src/wpf/ProgramInfoWindow.xaml" Link="ProgramInfoWindow.xaml"/>
+  </ItemGroup>
+</Project>
