@@ -1,8 +1,7 @@
 * text=auto eol=lf
-*.c text eol=lf
-*.h text eol=lf
-*.md text eol=lf
-*.sql text eol=lf
-*.py text eol=lf
-*.cmd text eol=crlf
-third_party/sqlite/* -whitespace
+*.dll binary
+*.exe binary
+*.png binary
+*.ttf binary
+*.otf binary
+final-product/src/third_party/sqlite/* -whitespace
