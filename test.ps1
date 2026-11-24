@@ -113,6 +113,10 @@ try {
 
     # runner는 일반 권한으로 실행하지만 참조하는 assembly/native 바이트는 생산본이다.
     $productNative = Join-Path $productRoot 'MonitorBridge.dll'
+    # 같은 표본의 목록·도넛은 전용 RAM, 상세 비교·알림은 공유 페이지 포함 Working Set이다.
+    # 실제 배포 DLL의 Projection과 WPF 바인딩을 쓰며 별도 사용자 DB나 실제 수집은 열지 않는다.
+    $runner = Publish-Runner 'RamDisplay' 'ram-display' $productNative
+    Run-Case 'private RAM list chart coverage sorting and inclusive evidence boundary' $dotnet @($runner, (Join-Path $resultRoot 'ram-display'), $managedHash, $nativeHash)
     $runner = Publish-Runner 'RecentComparison' 'recent-wpf' $productNative
     Run-Case 'WPF recent comparison and evidence priority' $dotnet @($runner, (Join-Path $resultRoot 'recent-wpf'), $managedHash)
     $runner = Publish-Runner 'RecentFailures' 'recent-failures' $productNative

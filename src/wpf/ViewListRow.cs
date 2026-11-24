@@ -39,10 +39,14 @@ internal sealed class ViewListRow : INotifyPropertyChanged
     public Brush Color => DonutChart.BrushOf(Group?.Color ?? "#7C8892");
     public string Cpu => Group is UiGroup group ? ViewFormat.WithCoverage(ViewFormat.Percent(group.CpuPercent), group.CpuValid, group.MemberCount) : ViewFormat.Percent(Row?.CpuPercent);
     public string Gpu => Group is UiGroup group ? ViewFormat.WithCoverage(ViewFormat.Percent(group.GpuPercent), group.GpuValid, group.MemberCount) : ViewFormat.Percent(Row?.GpuPercent);
-    public string Ram => Group is UiGroup group ? ViewFormat.WithCoverage(ViewFormat.Percent(group.RamPercent), group.RamValid, group.MemberCount) : ViewFormat.Percent(Row?.RamPercent);
+    public string Ram => Group is UiGroup group ? ViewFormat.WithCoverage(ViewFormat.Percent(group.PrivateRamPercent), group.PrivateRamValid, group.MemberCount) : ViewFormat.Percent(Row?.PrivateRamPercent);
+    public string RamTooltip => Group is UiGroup group
+        ? $"전용 RAM {Ram} · {group.PrivateRamValid}/{group.MemberCount}개 측정" +
+            (group.PrivateRamValid > 0 && group.PrivateRamValid < group.MemberCount ? " · 부분합" : "")
+        : $"전용 RAM {Ram} · 전용 Working Set / 전체 물리 RAM";
     public string Read => Group is UiGroup group ? ViewFormat.WithCoverage(Rate(group.ReadBytesPerSecond), group.ReadValid, group.MemberCount) : Rate(Row?.ReadBytesPerSecond);
     public string Write => Group is UiGroup group ? ViewFormat.WithCoverage(Rate(group.WriteBytesPerSecond), group.WriteValid, group.MemberCount) : Rate(Row?.WriteBytesPerSecond);
-    public string Tooltip => Group != null ? Group.Name : $"{Row!.Name} · PID {Row.Pid}\n생성 식별 {Row.Creation}\n{Row.Path}\n{Row.Evidence}";
+    public string Tooltip => Group != null ? $"{Group.Name}\n{RamTooltip}" : $"{Row!.Name} · PID {Row.Pid}\n생성 식별 {Row.Creation}\n{Row.Path}\n{Row.Evidence}";
     private static string Rate(double? value) => value is double v && double.IsFinite(v) && v >= 0 ? ViewFormat.Number(v / 1e6) : "—";
     public void Set(UiRow? row, UiGroup? group, bool expanded = false, string? displayKey = null)
     {

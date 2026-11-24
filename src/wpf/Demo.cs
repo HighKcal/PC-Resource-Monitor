@@ -29,6 +29,7 @@ internal static class Demo
                 members.Add(new UiRow { Pid = (uint)(3200+i), Creation = 134200000000001000UL+(ulong)i,
                     Name = key == Projection.Other ? "분리한 구성원" : name + " 실행기", GroupKey = key,
                     CpuPercent = cpu, GpuPercent = gpu, RamPercent = ram, WorkingSetBytes = ram*12e9/100,
+                    PrivateRamPercent = ram, PrivateWorkingSetBytes = ram*12e9/100,
                     ReadBytesPerSecond = 0, WriteBytesPerSecond = 0, ObservedAt = at,
                     ProgramId = (i+10).ToString(), Evidence = "합성 화면 검수 자료" });
             }
@@ -36,8 +37,10 @@ internal static class Demo
             groups.Add(new UiGroup { Key = key, Name = name, Color = color, Description = "합성 화면 검수 자료",
                 MemberCount = members.Count, AlertCount = members.Count(r => r.HasAlert),
                 CpuPercent = cpu, GpuPercent = gpu, RamPercent = ram, WorkingSetBytes = ram*12e9/100,
+                PrivateRamPercent = ram,
                 CpuValid = members.Count, GpuValid = members.Count(r => r.GpuPercent.HasValue),
-                RamValid = members.Count(r => r.RamPercent.HasValue), ReadValid = members.Count, WriteValid = members.Count,
+                RamValid = members.Count(r => r.RamPercent.HasValue), PrivateRamValid = members.Count(r => r.PrivateWorkingSetBytes.HasValue),
+                ReadValid = members.Count, WriteValid = members.Count,
                 ReadBytesPerSecond = members.Sum(r => r.ReadBytesPerSecond), WriteBytesPerSecond = members.Sum(r => r.WriteBytesPerSecond) });
         }
         Add("canvas", "라온 캔버스", "#218979", 32, 29, 28);
@@ -57,7 +60,7 @@ internal static class Demo
         return frame with { Rows = rows, Groups = groups, ObservedAt = at,
             Cpu = Chart("CPU", 64, g => g.CpuPercent, g => g.CpuValid),
             Gpu = Chart("GPU", 84, g => g.GpuPercent, g => g.GpuValid),
-            Ram = Chart("RAM", 75, g => g.RamPercent, g => g.RamValid) };
+            Ram = Chart("RAM", 75, g => g.PrivateRamPercent, g => g.PrivateRamValid) };
     }
 
     public static UiSnapshot Frame(uint session,long sequence,bool paused,bool enabled)
@@ -68,6 +71,7 @@ internal static class Demo
         UiRow Row(int i,string key,string name,double cpu,double gpu,double? ram,double read,double write,bool hasAlert=false) => new() {
             Pid=(uint)(2140+i),Creation=134200000000000002UL+(ulong)i,Name=name,GroupKey=key,
             CpuPercent=cpu,GpuPercent=gpu,RamPercent=ram,WorkingSetBytes=ram*12e9/100,ReadBytesPerSecond=read,WriteBytesPerSecond=write,
+            PrivateRamPercent=ram,PrivateWorkingSetBytes=ram*12e9/100,
             ObservedAt=when,Alert=hasAlert?alert:null,Alerts=hasAlert?[alert]:[],ProgramId=(i+1).ToString(),Evidence="합성 화면 검수 자료"
         };
         UiRow[] rows=[Row(0,"canvas","라온 렌더러",8,24,5,1.24e6,0.08e6,true),Row(1,"canvas","라온 편집기",24,5,23,0,12000),
@@ -79,15 +83,17 @@ internal static class Demo
             return new UiGroup {Key=key,Name=names[i],Color=colors[i],MemberCount=members.Length,
                 CpuPercent=members.Sum(r=>r.CpuPercent),GpuPercent=members.Sum(r=>r.GpuPercent),RamPercent=i==2?null:members.Sum(r=>r.RamPercent),
                 WorkingSetBytes=i==2?null:members.Sum(r=>r.WorkingSetBytes),ReadBytesPerSecond=members.Sum(r=>r.ReadBytesPerSecond),
-                WriteBytesPerSecond=members.Sum(r=>r.WriteBytesPerSecond),ReadValid=2,WriteValid=2,CpuValid=2,GpuValid=2,RamValid=i==2?0:2,AlertCount=i==0?1:0,Description=i==2?"미지정 2개":"합성 그룹"};
+                PrivateRamPercent=i==2?null:members.Sum(r=>r.PrivateRamPercent),
+                WriteBytesPerSecond=members.Sum(r=>r.WriteBytesPerSecond),ReadValid=2,WriteValid=2,CpuValid=2,GpuValid=2,RamValid=i==2?0:2,
+                PrivateRamValid=i==2?0:2,AlertCount=i==0?1:0,Description=i==2?"미지정 2개":"합성 그룹"};
         }).ToArray();
         UiChart Chart(string metric,double total,Func<UiGroup,double?> select,string explanation) =>
             Projection.Chart(metric,total,groups.Select(g=>new UiSlice {Key=g.Key,Name=g.Name,Color=g.Color,
                 Percent=select(g),DrawPercent=select(g)??0,Valid=select(g).HasValue?2:0,Total=2}).ToList(),explanation);
         return new UiSnapshot {SessionEpoch=session,Sequence=sequence,ObservedAt=when,Paused=paused,NotificationsEnabled=enabled,IsSynthetic=true,
-            Status=paused?"합성 · 일시정지":"합성 데이터",Footer="개별 RAM 2개 측정 불가",Groups=groups,Rows=rows,
+            Status=paused?"합성 · 일시정지":"합성 데이터",Footer="개별 전용 RAM 2개 측정 불가 · * 일부 구성원의 부분합",Groups=groups,Rows=rows,
             Cpu=Chart("CPU",64,g=>g.CpuPercent,"전체 논리 CPU 용량 기준 · 합성"),
             Gpu=Chart("GPU",84,g=>g.GpuPercent,"단일 GPU 엔진의 측정 구간 기준 · 합성"),
-            Ram=Chart("RAM",75,g=>g.RamPercent,"물리 RAM 12 GB · 도넛은 전용 Working Set. 이 예시의 측정 가능 행에는 공유 페이지가 없습니다. 미귀속 사용량 13%.") };
+            Ram=Chart("RAM",75,g=>g.PrivateRamPercent,"물리 RAM 12 GB · 목록·도넛은 전용 Working Set. PC 전체는 시스템 물리 RAM 사용률. 이 예시의 측정 가능 행에는 공유 페이지가 없습니다. 미귀속 사용량 13%.") };
     }
 }

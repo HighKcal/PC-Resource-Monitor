@@ -185,9 +185,9 @@ public partial class MainWindow : Window
     private static UiMetric DefaultMetric(UiRow row) => row.AlertCauses.FirstOrDefault()?.Metric ?? row.Comparisons.FirstOrDefault(c => c.Candidate)?.Metric ?? UiMetric.Ram;
     private bool IsExpanded(string group) => _expanded.TryGetValue(group, out var expanded) ? expanded : CurrentSnapshot.IsSynthetic;
     private object SortValue(UiRow row) => SortBox.SelectedIndex switch
-    { 1 => row.CpuPercent ?? -1, 2 => row.WorkingSetBytes ?? -1, 3 => row.GpuPercent ?? -1, 4 => row.ReadBytesPerSecond ?? -1, 5 => row.WriteBytesPerSecond ?? -1, _ => row.Name.ToUpperInvariant() };
+    { 1 => row.CpuPercent ?? -1, 2 => row.PrivateRamPercent ?? -1, 3 => row.GpuPercent ?? -1, 4 => row.ReadBytesPerSecond ?? -1, 5 => row.WriteBytesPerSecond ?? -1, _ => row.Name.ToUpperInvariant() };
     private object SortValue(UiGroup group) => SortBox.SelectedIndex switch
-    { 1 => group.CpuPercent ?? -1, 2 => group.WorkingSetBytes ?? -1, 3 => group.GpuPercent ?? -1, 4 => group.ReadBytesPerSecond ?? -1, 5 => group.WriteBytesPerSecond ?? -1, _ => group.Name.ToUpperInvariant() };
+    { 1 => group.CpuPercent ?? -1, 2 => group.PrivateRamPercent ?? -1, 3 => group.GpuPercent ?? -1, 4 => group.ReadBytesPerSecond ?? -1, 5 => group.WriteBytesPerSecond ?? -1, _ => group.Name.ToUpperInvariant() };
     private sealed record DisplayRow(UiRow Row, string Key);
     private IEnumerable<DisplayRow> Sorted(IEnumerable<DisplayRow> rows) => SortBox.SelectedIndex == 0 ? rows : SortBox.SelectedIndex == 6 ? rows.OrderBy(r => SortValue(r.Row)).ThenBy(r => r.Row.Pid) : rows.OrderByDescending(r => SortValue(r.Row)).ThenBy(r => r.Row.Pid);
     private IEnumerable<UiGroup> Sorted(IEnumerable<UiGroup> groups) => SortBox.SelectedIndex == 0 ? groups : SortBox.SelectedIndex == 6 ? groups.OrderBy(SortValue) : groups.OrderByDescending(SortValue);
@@ -258,7 +258,7 @@ public partial class MainWindow : Window
         CpuChart.SetChart(CurrentSnapshot.Cpu, group?.Key);
         GpuChart.SetChart(CurrentSnapshot.Gpu, group?.Key);
         RamChart.SetChart(CurrentSnapshot.Ram, group?.Key);
-        ChartExplanationText.Text = $"CPU · {CurrentSnapshot.Cpu.Explanation}\nGPU · {CurrentSnapshot.Gpu.Explanation}\nRAM · {CurrentSnapshot.Ram.Explanation}\n목록 RAM은 Working Set / 전체 물리 RAM입니다. 공유 페이지가 중복될 수 있어 원의 그룹 값과 다를 수 있습니다. 모든 %는 검색 전 같은 수집 회차를 기준으로 합니다.";
+        ChartExplanationText.Text = $"CPU · {CurrentSnapshot.Cpu.Explanation}\nGPU · {CurrentSnapshot.Gpu.Explanation}\nRAM · {CurrentSnapshot.Ram.Explanation}\n목록의 전용 RAM과 원의 그룹 값은 같은 구성원의 전용 Working Set / 전체 물리 RAM입니다. *는 일부 구성원의 부분합이며 측정한 구성원 수는 말풍선에서 확인할 수 있습니다. 상세·개인 비교·알림의 RAM은 공유 페이지를 포함한 Working Set입니다. 모든 %는 검색 전 같은 수집 회차를 기준으로 하며, 작은 그룹 목록은 열 때의 시점을 유지합니다.";
     }
 
     private enum AnalysisEvidenceSource { SavedAlert, PersonalComparison, RecentComparison }
@@ -445,7 +445,7 @@ public partial class MainWindow : Window
         AnalysisMetric.Visibility = Visibility.Hidden;
         AverageCard.Tag = null;
         CurrentCard.Tag = null;
-        AverageTitle.Text = "그룹 CPU"; UpperTitle.Text = "그룹 GPU"; CurrentTitle.Text = "그룹 RAM · Working Set";
+        AverageTitle.Text = "그룹 CPU"; UpperTitle.Text = "그룹 GPU"; CurrentTitle.Text = "그룹 RAM · Working Set (공유 페이지 포함)";
         string Covered(string value, int valid) => ViewFormat.WithCoverage(value, valid, group.MemberCount);
         string Observed(int valid) => valid == group.MemberCount && valid > 0 && CurrentSnapshot.ObservedAt.HasValue
             ? ViewFormat.Time(CurrentSnapshot.ObservedAt) + " 측정" : $"{group.MemberCount}개 중 {valid}개 측정";
@@ -460,8 +460,9 @@ public partial class MainWindow : Window
         var write = Covered(ViewFormat.Value(UiMetric.Write, group.WriteBytesPerSecond), group.WriteValid);
         SelectedIo.Text = $"구성원 I/O 합계   읽기 {read}  ·  쓰기 {write}";
         _evidence = $"{group.Name} · 그룹 합계\n{group.Description}\n{group.Evidence}\n\n" +
-            $"목록 RAM · Working Set {Covered(ViewFormat.Value(UiMetric.Ram, group.WorkingSetBytes), group.RamValid)} (공유 페이지 포함)\n" +
-            "도넛 RAM은 전용 Working Set을 사용합니다. *는 일부 구성원만 측정한 합계입니다.";
+            $"상세 RAM · Working Set {Covered(ViewFormat.Value(UiMetric.Ram, group.WorkingSetBytes), group.RamValid)} (공유 페이지 포함) · {group.RamValid}/{group.MemberCount}개 측정\n" +
+            $"목록·도넛 전용 RAM · {Covered(ViewFormat.Percent(group.PrivateRamPercent), group.PrivateRamValid)} / 전체 물리 RAM · {group.PrivateRamValid}/{group.MemberCount}개 측정\n" +
+            "*는 일부 구성원만 측정한 합계입니다. 개인 비교와 알림도 공유 페이지를 포함한 Working Set을 사용합니다.";
         if (notified.Length > 0)
             _evidence += $"\n\n알림 기록이 있는 구성원 {notified.Length}개. 제목의 지표는 당시 구간, 평균, 상한이 함께 보존된 기록을 기준으로 합니다.";
     }

@@ -59,13 +59,13 @@ public sealed class DonutChart : Grid
 
     public void SetChart(UiChart chart, string? selectedGroup, DateTimeOffset? observedAt = null)
     {
-        if (_chart.Total != chart.Total) _totalText = "전체 " + ViewFormat.Percent(chart.Total);
+        _totalText = (chart.MetricName == "RAM" ? "PC 전체 " : "전체 ") + ViewFormat.Percent(chart.Total);
         _chart = chart; _selected = selectedGroup;
         if (_hovered != null && !chart.Slices.Any(s => s.Key == _hovered))
         { _hovered = null; _tip.IsOpen = false; }
         var selected = chart.Slices.FirstOrDefault(s => s.Key == selectedGroup);
         var name = $"{chart.MetricName}, {_totalText}";
-        AutomationProperties.SetName(this, selected == null ? name : $"{name}, {selected.Name} {selected.DisplayPercent}");
+        AutomationProperties.SetName(this, selected == null ? name : $"{name}, {SliceDescription(selected)}");
         BuildArcs();
         SmallGroupCount = _arcs.Count(a => IsSmall(a.Slice));
         UpdateSmallButton();
@@ -213,10 +213,15 @@ public sealed class DonutChart : Grid
             _tip.Content = null;
             return;
         }
-        _tip.Content = $"{slice.Name.ReplaceLineEndings(" ")} {slice.DisplayPercent}";
+        _tip.Content = SliceDescription(slice);
         _tip.PlacementTarget = this;
         _tip.IsOpen = true;
     }
+
+    private string SliceDescription(UiSlice slice) => $"{slice.Name.ReplaceLineEndings(" ")} {slice.DisplayPercent}" +
+        (_chart.MetricName == "RAM" && slice.Total > 0
+            ? $" · {slice.Valid}/{slice.Total}개 측정" + (slice.Valid > 0 && slice.Valid < slice.Total ? " · 부분합" : "")
+            : "");
 
     private FormattedText Text(string content, double size, FontWeight weight, Brush brush) =>
         new(content, CultureInfo.CurrentUICulture, FlowDirection.LeftToRight,

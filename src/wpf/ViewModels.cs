@@ -86,8 +86,12 @@ public sealed record UiRow
     public string Path { get; init; } = "";
     public double? CpuPercent { get; init; }
     public double? GpuPercent { get; init; }
+    // 기존 RAM 값은 공유 페이지를 포함한 Working Set이다. 개인 비교·알림·상세에서
+    // 같은 지표를 유지하며, 목록과 도넛의 전용 RAM으로 대체하지 않는다.
     public double? RamPercent { get; init; }
     public double? WorkingSetBytes { get; init; }
+    public double? PrivateRamPercent { get; init; }
+    public double? PrivateWorkingSetBytes { get; init; }
     public double? ReadBytesPerSecond { get; init; }
     public double? WriteBytesPerSecond { get; init; }
     public DateTimeOffset? ObservedAt { get; init; }
@@ -117,13 +121,16 @@ public sealed record UiGroup
     public string Description { get; init; } = "";
     public double? CpuPercent { get; init; }
     public double? GpuPercent { get; init; }
+    // 상세용 Working Set 합계와 목록·도넛용 전용 RAM 부분합은 유효 범위도 다르다.
     public double? RamPercent { get; init; }
     public double? WorkingSetBytes { get; init; }
+    public double? PrivateRamPercent { get; init; }
     public double? ReadBytesPerSecond { get; init; }
     public double? WriteBytesPerSecond { get; init; }
     public int CpuValid { get; init; }
     public int GpuValid { get; init; }
     public int RamValid { get; init; }
+    public int PrivateRamValid { get; init; }
     public int ReadValid { get; init; }
     public int WriteValid { get; init; }
     public int MemberCount { get; init; }

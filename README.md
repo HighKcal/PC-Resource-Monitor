@@ -24,7 +24,8 @@ Windows에서 실행 중인 프로세스가 내 PC에서 평소보다 CPU나 메
 
 ## 사용량 읽기
 
-- **그룹을 펼쳐 보세요.** ‘프로그램과 구성원’은 그룹별 현재 CPU·GPU·RAM 사용량을 보여 줍니다. 그룹을 펼쳐 구성원 하나를 선택하면 그 프로세스의 개인 기준과 측정값을 볼 수 있습니다. GPU는 현재 사용량을 보는 지표입니다. 평소 상한을 넘었는지 판단해 알림을 보내는 지표는 CPU, RAM, I/O 읽기·쓰기입니다.
+- **그룹을 펼쳐 보세요.** ‘프로그램과 구성원’에서 그룹별 CPU·GPU·전용 RAM을 보고, 펼친 구성원을 선택해 개인 기준과 측정값을 확인합니다. GPU는 현재 사용량만 표시하며, 변화 알림은 CPU·RAM·I/O 읽기·쓰기를 대상으로 합니다.
+- **RAM의 기준을 구분하세요.** 목록·도넛의 그룹 값과 ‘전용 RAM 높은 순’은 **전용 Working Set / 전체 물리 RAM** 기준입니다. 일부 구성원만 측정한 부분합은 `*`와 말풍선의 측정 구성원 수로 구분합니다. 열 상단과 도넛 중앙의 ‘PC 전체’는 시스템 RAM 사용률이며, 상세·개인 기준·최근 비교·알림은 **공유 페이지를 포함한 Working Set**을 사용합니다.
 - **첫날에는 ‘최근 기록과 비교’를 보세요.** 개인 기준을 학습하는 동안에도 같은 수집 세션에서 같은 프로세스의 변화를 볼 수 있습니다. 해당 지표에 직전 60분의 유효한 과거 구간이 5개 이상 있으면, 최근 기록의 중앙값(최대 30개 구간)과 가장 최근에 끝난 유효 구간의 평균을 나란히 표시합니다. 이 비교는 화면 설명용이며 알림은 위의 장기 기준을 따릅니다.
 
 ‘이 프로그램 알아보기’는 먼저 로컬 파일 정보와 서명을 확인합니다. 외부 자료 조회는 보낼 내용과 목적지를 확인해 동의한 뒤 시작하며, 번역은 별도로 동의한 공개 문장 한 개만 전송합니다.
@@ -37,7 +38,7 @@ Windows에서 실행 중인 프로세스가 내 PC에서 평소보다 CPU나 메
 | 구간 평균 | [monitor_window.c](src/engine/monitor_window.c) | `monitor_window_observe`가 표본을 누적하고 `monitor_window_metric`이 RAM 표본 수와 평균을 확인합니다. |
 | SQLite 저장과 이력 조회 | [monitor_storage.c](src/storage/monitor_storage.c) · [monitor_history.c](src/storage/monitor_history.c) | 원시 표본과 완료 구간을 저장합니다. `monitor_history_select_day`는 같은 실행 경로·지표의 학습용 과거 구간을 날짜별로 고릅니다. |
 | 개인 기준 판정 | [baseline.c](src/detection/baseline.c) | `monitor_baseline`에서 과거 중앙값과 상한을 계산하고 연속 초과 횟수로 후보를 판정합니다. |
-| 프로그램 그룹 합산 | [program_groups.c](src/grouping/program_groups.c) | `pg_groups_build`가 구성원을 그룹에 배정하고 각 구성원의 현재 표본에서 CPU·RAM·I/O를 합산합니다. |
+| 프로그램 그룹 합산 | [program_groups.c](src/grouping/program_groups.c) · [Projection.cs](src/wpf/Projection.cs) | `pg_groups_build`가 구성원을 그룹에 배정하고 현재 표본의 CPU·Working Set·I/O를 합산합니다. 화면의 전용 RAM 합계와 유효 구성원 수는 `Projection.Build`에서 별도로 계산해 목록과 도넛에 함께 전달합니다. |
 | 알림 정책 | [notification_policy.c](src/notifications/notification_policy.c) | `notification_policy_observe`가 후보를 모으고 `notification_policy_dispatch`가 전달할 구성원과 지표를 다시 확인합니다. |
 | C와 WPF 연결 | [Engine.cs](src/wpf/Engine.cs) · [bridge.c](src/wpf/native/bridge.c) | C#이 네이티브 DLL의 `bridge_collect`를 호출해 한 회차를 수집하고 `bridge_notification_click`으로 클릭한 알림 기록을 가져옵니다. |
 | 알림 클릭과 상세 화면 | [WindowController.cs](src/wpf/WindowController.cs) · [MainWindow.xaml.cs](src/wpf/MainWindow.xaml.cs) | `Navigate`가 클릭한 프로세스를 선택하고 `RenderProcessAnalysis`가 당시 기록과 현재 표본을 각각의 카드에 표시합니다. |
@@ -51,4 +52,4 @@ Windows x64에서 Visual Studio 또는 Build Tools의 **C++를 사용한 데스�
 .\test.ps1 -SkipBuild
 ```
 
-첫 명령은 `bin/win-x64/`에 실행물을 만들고, 두 번째 명령은 방금 빌드한 제품으로 대표 회귀 19종을 실행합니다. 시험 결과는 `.test-results/`에 저장됩니다.
+첫 명령은 `bin/win-x64/`에 실행물을 만들고, 두 번째 명령은 방금 빌드한 제품으로 대표 회귀 20종을 실행합니다. 시험 결과는 `.test-results/`에 저장됩니다.
