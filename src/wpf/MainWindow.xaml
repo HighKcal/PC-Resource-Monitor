@@ -95,7 +95,7 @@
         </Grid>
         <TextBlock Grid.Column="1" Text="{Binding Cpu}" Style="{StaticResource Number}"/>
         <TextBlock Grid.Column="2" Text="{Binding Gpu}" Style="{StaticResource Number}"/>
-        <TextBlock Grid.Column="3" Text="{Binding Ram}" Style="{StaticResource Number}"/>
+        <TextBlock Grid.Column="3" Text="{Binding Ram}" ToolTip="{Binding RamTooltip}" Style="{StaticResource Number}"/>
         <TextBlock Grid.Column="4" Text="{Binding Read}" Style="{StaticResource Number}" TextTrimming="CharacterEllipsis"/>
         <TextBlock Grid.Column="5" Text="{Binding Write}" Style="{StaticResource Number}" TextTrimming="CharacterEllipsis"/>
         <Border Grid.ColumnSpan="6" Height="1" VerticalAlignment="Bottom" Margin="15,0" Background="#E4EAE6"/>
@@ -131,7 +131,7 @@
     <WrapPanel x:Name="Toolbar" Margin="0,0,0,12" Visibility="Collapsed">
       <TextBox x:Name="SearchBox" Width="218" Height="32" FontSize="13" Padding="9,5" BorderBrush="#D5DFD9" VerticalContentAlignment="Center" TextChanged="OnSearchChanged" ToolTip="이름·경로·PID 검색" AutomationProperties.Name="프로세스 검색"/>
       <ComboBox x:Name="SortBox" Width="137" Height="32" Margin="7,0,7,0" Padding="7,4" SelectedIndex="0" SelectionChanged="OnSortChanged" AutomationProperties.Name="목록 정렬">
-        <ComboBoxItem Content="기본 순"/><ComboBoxItem Content="CPU 높은 순"/><ComboBoxItem Content="RAM 높은 순"/><ComboBoxItem Content="GPU 높은 순"/><ComboBoxItem Content="읽기 높은 순"/><ComboBoxItem Content="쓰기 높은 순"/><ComboBoxItem Content="이름 순"/>
+        <ComboBoxItem Content="기본 순"/><ComboBoxItem Content="CPU 높은 순"/><ComboBoxItem Content="전용 RAM 높은 순"/><ComboBoxItem Content="GPU 높은 순"/><ComboBoxItem Content="읽기 높은 순"/><ComboBoxItem Content="쓰기 높은 순"/><ComboBoxItem Content="이름 순"/>
       </ComboBox>
       <Button x:Name="PauseButton" Content="일시정지" Click="OnPause" Margin="0,0,7,0"/>
       <Button Content="구성원 편집" Click="OnGroupMenu" Margin="0,0,7,0"/>
@@ -159,7 +159,7 @@
             <Button Content="이름" HorizontalContentAlignment="Left" Margin="21,0,0,0" Style="{StaticResource HeaderButton}" Tag="6" Click="OnSortHeader"/>
             <Button Grid.Column="1" Style="{StaticResource HeaderButton}" Tag="1" Click="OnSortHeader"><StackPanel><TextBlock Text="CPU" FontSize="18" FontWeight="Bold" Foreground="{StaticResource Muted}" TextAlignment="Right"/><TextBlock x:Name="CpuTotal" Text="—" FontSize="13" TextAlignment="Right"/></StackPanel></Button>
             <Button Grid.Column="2" Style="{StaticResource HeaderButton}" Tag="3" Click="OnSortHeader"><StackPanel><TextBlock Text="GPU" FontSize="18" FontWeight="Bold" Foreground="{StaticResource Muted}" TextAlignment="Right"/><TextBlock x:Name="GpuTotal" Text="—" FontSize="13" TextAlignment="Right"/></StackPanel></Button>
-            <Button Grid.Column="3" Style="{StaticResource HeaderButton}" Tag="2" Click="OnSortHeader" ToolTip="전체: 시스템 물리 RAM 사용률. 행: Working Set / 물리 RAM. 공유 페이지가 중복될 수 있습니다."><StackPanel><TextBlock Text="RAM" FontSize="18" FontWeight="Bold" Foreground="{StaticResource Muted}" TextAlignment="Right"/><TextBlock x:Name="RamTotal" Text="—" FontSize="13" TextAlignment="Right"/></StackPanel></Button>
+            <Button Grid.Column="3" Style="{StaticResource HeaderButton}" Padding="0,4,12,4" Tag="2" Click="OnSortHeader" ToolTip="PC 전체: 시스템 물리 RAM 사용률. 행·도넛 그룹: 전용 Working Set / 전체 물리 RAM. 상세·개인 비교·알림: 공유 페이지를 포함한 Working Set."><StackPanel><TextBlock Text="전용 RAM" FontSize="12" FontWeight="Bold" Foreground="{StaticResource Muted}" TextAlignment="Right"/><TextBlock Text="PC 전체" FontSize="9" Foreground="{StaticResource Muted}" TextAlignment="Right"/><TextBlock x:Name="RamTotal" Text="—" FontSize="13" TextAlignment="Right"/></StackPanel></Button>
             <Button Grid.Column="4" Content="읽기 MB/s" FontSize="12" Style="{StaticResource HeaderButton}" Tag="4" Click="OnSortHeader"/>
             <Button Grid.Column="5" Content="쓰기 MB/s" FontSize="12" Style="{StaticResource HeaderButton}" Tag="5" Click="OnSortHeader"/>
           </Grid>
@@ -195,7 +195,7 @@
                 <UniformGrid Columns="3">
                   <Border x:Name="AverageCard" Style="{StaticResource AverageCardStyle}" Margin="0,0,7,0"><StackPanel><TextBlock x:Name="AverageTitle" Text="당시 구간 평균" FontSize="14"/><TextBlock x:Name="AverageValue" FontSize="26" FontWeight="Bold" Margin="0,2"/><TextBlock x:Name="AverageTime" Foreground="{StaticResource Muted}" FontSize="12" TextWrapping="Wrap"/></StackPanel></Border>
                   <Border x:Name="UpperCard" Style="{StaticResource ComparisonCard}" Margin="6,0,6,0"><StackPanel><TextBlock x:Name="UpperTitle" Text="당시 평소 상한" FontSize="14"/><TextBlock x:Name="UpperValue" FontSize="26" FontWeight="Bold" Margin="0,2"/><TextBlock x:Name="UpperTime" Foreground="{StaticResource Muted}" FontSize="12" TextWrapping="Wrap"/></StackPanel></Border>
-                  <Border x:Name="CurrentCard" Style="{StaticResource CurrentCardStyle}" Margin="7,0,0,0"><StackPanel><TextBlock x:Name="CurrentTitle" Text="현재 RAM" FontSize="14"/><TextBlock x:Name="CurrentValue" FontSize="26" FontWeight="Bold" Margin="0,2"/><TextBlock x:Name="CurrentTime" Foreground="{StaticResource Muted}" FontSize="12" TextWrapping="Wrap"/></StackPanel></Border>
+                  <Border x:Name="CurrentCard" Style="{StaticResource CurrentCardStyle}" Margin="7,0,0,0"><StackPanel><TextBlock x:Name="CurrentTitle" Text="현재 RAM" FontSize="14" TextWrapping="Wrap"/><TextBlock x:Name="CurrentValue" FontSize="26" FontWeight="Bold" Margin="0,2"/><TextBlock x:Name="CurrentTime" Foreground="{StaticResource Muted}" FontSize="12" TextWrapping="Wrap"/></StackPanel></Border>
                 </UniformGrid>
                 <TextBlock x:Name="SelectedIo" FontSize="13" Foreground="{StaticResource Muted}" Margin="0,8,0,9" TextWrapping="Wrap"/>
               </StackPanel>

@@ -126,8 +126,8 @@ internal sealed class Projection
         string note = !used.HasValue ? "전체 측정 대기 또는 사용 불가" : !partition ? "측정 시차로 귀속 합이 전체를 초과함 · 원은 전체/여유" : "";
         return new UiChart { MetricName=metric, Total=used, Slices=slices, CanPartition=partition, Note=note, Explanation=detail + (note.Length==0?"":" · "+note) };
     }
-    // native 그룹을 표시 묶음으로 옮긴 뒤 행, 그룹 합계, 도넛 순서로 만든다. 목록 RAM은
-    // Working Set, 도넛 RAM은 전용 Working Set이며 유효 구성원 수를 각 지표에 함께 전달한다.
+    // native 그룹을 표시 묶음으로 옮긴 뒤 행, 그룹 합계, 도넛 순서로 만든다. 목록과
+    // 도넛은 같은 전용 RAM 부분합·유효 수를 사용하고, 상세·비교용 Working Set은 보존한다.
     public UiSnapshot Build(Snapshot data,SystemReading sys,bool enable,
         IReadOnlyDictionary<(ProcessKey,long),UiAlert[]> alerts)
     {
@@ -164,6 +164,7 @@ internal sealed class Projection
             rows[i]=new UiRow { Pid=r.Key.Pid, Creation=r.Key.Creation, IdentityValid=identified,
                 GroupKey=memberships[i], Name=r.DisplayName, Path=r.Path, ProgramId=r.ProgramId.ToString(CultureInfo.InvariantCulture),
                 CpuPercent=r.Value(0), WorkingSetBytes=r.Value(1), RamPercent=sys.MemoryPercent(r.Value(1)), GpuPercent=identified ? sys.GpuShare(r) : null,
+                PrivateWorkingSetBytes=r.PrivateWorkingSet, PrivateRamPercent=sys.MemoryPercent(r.PrivateWorkingSet),
                 ReadBytesPerSecond=r.Value(2), WriteBytesPerSecond=r.Value(3), ObservedAt=Time(r.MeasuredUtc),
                 Comparisons=r.Metric.Select(Compare).ToArray(), Alert=copies.FirstOrDefault(), Alerts=copies,
                 Feedback=Feedback(r), Evidence=Evidence(r) };
@@ -174,26 +175,28 @@ internal sealed class Projection
             (double? cpu,int cv)=Sum(b,0,data); (double? ws,int wv)=Sum(b,1,data);
             (double? read,int rv)=Sum(b,2,data); (double? write,int wtv)=Sum(b,3,data);
             (double? gpu,int gv)=SumValues(b.Members.Select(i=>rows[i].GpuPercent));
-            (double? exclusive,int pv)=SumValues(b.Members.Select(i=>(double?)data.Rows[i].PrivateWorkingSet));
+            (double? exclusive,int pv)=SumValues(b.Members.Select(i=>rows[i].PrivateWorkingSetBytes));
+            double? privatePercent=sys.MemoryPercent(exclusive);
             int n=b.Members.Count;
             string color=Color(b.Key);
             UiSlice Slice(double? percent,int valid) => new() {Key=b.Key,Name=b.Name,Color=color,Percent=percent,DrawPercent=percent??0,Valid=valid,Total=n};
-            cpuSlices.Add(Slice(cpu,cv)); gpuSlices.Add(Slice(gpu,gv)); ramSlices.Add(Slice(sys.MemoryPercent(exclusive),pv));
+            cpuSlices.Add(Slice(cpu,cv)); gpuSlices.Add(Slice(gpu,gv)); ramSlices.Add(Slice(privatePercent,pv));
             groups.Add(new UiGroup {Key=b.Key,Name=b.Name,Color=color,Description=b.Description,MemberCount=n,
                 CpuPercent=cpu,CpuValid=cv,GpuPercent=gpu,GpuValid=gv,RamPercent=sys.MemoryPercent(ws),RamValid=wv,WorkingSetBytes=ws,
+                PrivateRamPercent=privatePercent,PrivateRamValid=pv,
                 ReadBytesPerSecond=read,WriteBytesPerSecond=write,ReadValid=rv,WriteValid=wtv,AlertCount=b.Members.Count(i=>rows[i].Alert!=null),
                 Evidence=$"유효/전체: CPU {cv}/{n}, GPU {gv}/{n}, Working Set {wv}/{n}, 전용 RAM {pv}/{n}, 읽기 {rv}/{n}, 쓰기 {wtv}/{n}" });
         }
         string at=Time(sys.Utc)?.ToLocalTime().ToString("HH:mm:ss.fff") ?? "—";
         string gpuInfo=sys.Gpu.HasValue ? $"{sys.Engine} · {Time(sys.GpuStart)?.ToLocalTime():HH:mm:ss.fff}–{Time(sys.GpuEnd)?.ToLocalTime():HH:mm:ss.fff}" : $"카운터 상태 0x{sys.GpuStatus:X8}";
-        int missingRam=rows.Count(r=>!r.WorkingSetBytes.HasValue);
+        int missingRam=rows.Count(r=>!r.PrivateWorkingSetBytes.HasValue);
         return new UiSnapshot {SessionEpoch=data.Session,Sequence=(long)data.Sequence,ObservedAt=Time(data.MeasuredUtc),
             Paused=data.Paused,IsSynthetic=data.Synthetic,NotificationsEnabled=enable,RetentionPending=data.RetentionPending,
             GroupRefreshPending=data.GroupRefreshPending,
             Status=data.Paused?"일시정지":data.Synthetic?"합성 데이터":"실시간 수집 중",
-            Footer=$"개별 RAM {missingRam}개 측정 불가"+(data.GroupingFailed?" · 그룹 관계 확인 불가":""),
+            Footer=$"개별 전용 RAM {missingRam}개 측정 불가 · * 일부 구성원의 부분합"+(data.GroupingFailed?" · 그룹 관계 확인 불가":""),
             Rows=rows,Groups=groups, Cpu=Chart("CPU",sys.Cpu,cpuSlices,$"전체 논리 CPU의 비유휴 시간 · 시스템 관측 {at}. 그룹은 구성원별 QPC 구간의 현재 비율 합."),
             Gpu=Chart("GPU",sys.Gpu,gpuSlices,$"가장 바쁜 단일 GPU 엔진의 관측 점유율 · {gpuInfo}. 해당 엔진에서 같은 실행 인스턴스로 확인한 PID만 귀속."),
-            Ram=Chart("RAM",sys.Ram,ramSlices,$"물리 메모리 {(sys.Capacity/1e9):0.0} GB · 시스템 관측 {at}. 원은 전용 Working Set, 목록과 개인 기준은 공유 페이지를 포함한 Working Set. 나머지 사용량은 미귀속.") };
+            Ram=Chart("RAM",sys.Ram,ramSlices,$"물리 메모리 {(sys.Capacity/1e9):0.0} GB · 시스템 관측 {at}. PC 전체는 시스템 물리 RAM 사용률, 목록과 그룹 조각은 전용 Working Set / 전체 물리 RAM. 나머지 사용량은 미귀속.") };
     }
 }

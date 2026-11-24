@@ -81,7 +81,8 @@ internal static class DuplicateRows
         => new() {
             Name = name, Pid = pid, Creation = creation, IdentityValid = valid, Path = "SYNTHETIC " + name,
             ProgramId = "7", GroupKey = "fixture", CpuPercent = cpu, WorkingSetBytes = memory,
-            RamPercent = memory / 1e8, ReadBytesPerSecond = cpu / 11 * 1e6,
+            RamPercent = memory / 1e8, PrivateWorkingSetBytes = memory, PrivateRamPercent = memory / 1e8,
+            ReadBytesPerSecond = cpu / 11 * 1e6,
             WriteBytesPerSecond = (cpu / 11 + 2) * 1e6, ObservedAt = Now,
             Comparisons = [new() { Metric = UiMetric.Cpu, StateCode = MetricState.Normal, Average = cpu / 2,
                 Upper = cpu * 2, Start = Now.AddMinutes(-1), End = Now }]
